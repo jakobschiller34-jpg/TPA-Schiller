@@ -1,0 +1,226 @@
+/* Schlichtes, responsives Layout ohne Framework. Mobile first. */
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --text: #1c2330;
+  --muted: #5f6b7a;
+  --border: #d9dee5;
+  --accent: #fc4c02; /* Strava-ähnliches Orange als Akzent */
+  --accent-text: #ffffff;
+  --danger: #c62828;
+  --ok: #2e7d32;
+  --radius: 8px;
+  --gap: 1rem;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12161c;
+    --surface: #1b2129;
+    --text: #e6e9ee;
+    --muted: #9aa5b3;
+    --border: #2d3540;
+    --danger: #ef5350;
+    --ok: #66bb6a;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Das hidden-Attribut muss immer gewinnen, auch gegen display: flex/grid aus Klassen. */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+a {
+  color: inherit;
+}
+
+/* ---------- Kopfbereich & Navigation ---------- */
+
+.site-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem var(--gap);
+}
+
+.header-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.brand {
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.user-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.main-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  max-width: 960px;
+  margin: 0.75rem auto 0;
+}
+
+.main-nav a {
+  padding: 0.35rem 0.7rem;
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: var(--muted);
+}
+
+.main-nav a:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.main-nav a.active {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* ---------- Inhalt ---------- */
+
+.content {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--gap);
+}
+
+.content:focus {
+  outline: none;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--gap);
+  margin-bottom: var(--gap);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.todo {
+  border-left: 4px solid var(--accent);
+  padding-left: 0.75rem;
+  color: var(--muted);
+}
+
+.message {
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.message.error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.message.ok {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+/* ---------- Formulare & Buttons ---------- */
+
+.form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.form label {
+  display: grid;
+  gap: 0.25rem;
+  font-weight: 600;
+}
+
+.form input {
+  font: inherit;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  width: 100%;
+}
+
+.form .hint {
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.button {
+  font: inherit;
+  cursor: pointer;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  display: inline-block;
+  text-decoration: none;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.button-secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.button-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.button-small {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+@media (min-width: 640px) {
+  .content {
+    padding: 1.5rem var(--gap);
+  }
+}

@@ -1,0 +1,26 @@
+# Betriebssystem
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editoren
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# Lokale Geheimnisse – niemals committen
+.env
+.env.*
+*.local
+*.secret
+secrets/
+
+# Firebase CLI (falls später genutzt)
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+
+# Logs
+*.log
+npm-debug.log*

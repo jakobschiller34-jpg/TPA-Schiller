@@ -1,0 +1,29 @@
+rules_version = '2';
+
+// Firestore Security Rules
+//
+// Grundsatz: Jeder angemeldete Nutzer darf ausschließlich seine eigenen Daten unter
+// users/{uid}/... lesen und schreiben. Alles andere ist gesperrt (Firestore verbietet
+// standardmäßig alles, was nicht explizit erlaubt ist).
+//
+// Geplantes Datenmodell:
+//   users/{uid}                              – Profil / Einstellungen ohne Geheimnisse
+//   users/{uid}/activities/{activityId}      – normalisierte Strava-Aktivitäten
+//   users/{uid}/analyses/{analysisId}        – Auswertungen und Claude-Empfehlungen
+//   users/{uid}/plans/{planId}               – Trainingspläne
+//
+// Strava-Tokens und API-Keys werden NIE in Firestore gespeichert (nur localStorage).
+//
+// Einfügen in der Firebase-Konsole: Firestore Database → Regeln → Inhalt ersetzen → Veröffentlichen.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      match /{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+  }
+}

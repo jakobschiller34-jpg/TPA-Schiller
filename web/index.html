@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TPA – Trainingsplaner</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-top">
+        <a class="brand" href="#aktivitaeten">TPA Trainingsplaner</a>
+        <div class="user-status">
+          <span id="user-name" class="muted">Nicht angemeldet</span>
+          <button id="logout-button" class="button button-small" type="button" hidden>Abmelden</button>
+        </div>
+      </div>
+      <nav class="main-nav" aria-label="Hauptnavigation">
+        <a href="#login" data-route="login">Login</a>
+        <a href="#verbinden" data-route="verbinden">Strava verbinden</a>
+        <a href="#aktivitaeten" data-route="aktivitaeten">Aktivitäten</a>
+        <a href="#analyse" data-route="analyse">Analyse</a>
+        <a href="#plan" data-route="plan">Trainingsplan</a>
+        <a href="#einstellungen" data-route="einstellungen">Einstellungen</a>
+      </nav>
+    </header>
+
+    <main id="view" class="content" tabindex="-1">
+      <p class="muted">Lade …</p>
+    </main>
+
+    <noscript>Diese App benötigt JavaScript.</noscript>
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
