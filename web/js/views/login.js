@@ -30,7 +30,7 @@ export function render(container) {
       </form>
 
       <div id="login-logged-in" class="button-row" hidden>
-        <a class="button" href="#aktivitaeten">Weiter zu den Aktivitäten</a>
+        <a class="button" href="#plan">Weiter zum Trainingsplan</a>
         <button id="login-logout" class="button button-secondary" type="button">Abmelden</button>
       </div>
 
@@ -73,7 +73,7 @@ export function render(container) {
       await loginWithEmail(form.email.value.trim(), form.password.value);
       form.reset();
       // Zurück zur ursprünglich gewünschten Seite (von der Login-Sperre gemerkt)
-      let target = "aktivitaeten";
+      let target = "plan";
       try {
         target = sessionStorage.getItem("tpa.returnTo") || target;
         sessionStorage.removeItem("tpa.returnTo");

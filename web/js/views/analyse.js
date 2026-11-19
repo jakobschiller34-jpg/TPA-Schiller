@@ -1,15 +1,6 @@
-import { analyze, SPORT_GROUPS, summaryForAi, ZONES } from "../analysis.js";
-import {
-  getProfile,
-  latestAnalysis,
-  latestSeasonPlan,
-  listActivities,
-  onUserChanged,
-  saveAnalysis,
-  saveProfile,
-} from "../firebase.js";
-import { currentSeasonContext } from "../season.js";
-import { ANALYSIS_MODES, getRecommendation } from "../gemini.js";
+import { analyze, SPORT_GROUPS, ZONES } from "../analysis.js";
+import { getProfile, latestAnalysis, listActivities, onUserChanged, saveProfile } from "../firebase.js";
+import { ANALYSIS_MODES } from "../gemini.js";
 
 const MAX_ACTIVITIES = 1000;
 
@@ -343,83 +334,21 @@ export function render(container) {
     results.replaceChildren(...cards);
   }
 
-  // ---------- Gemini-Empfehlungen ----------
+  // ---------- Gemini-Einschätzung (nur Anzeige) ----------
+  // Geplant wird ausschließlich auf der Seite „Trainingsplan“ (Saisonplan → Woche → Tage).
+  // Jede Tagesplan-Erstellung liefert auch die Einschätzung, die hier angezeigt wird.
 
   let latest = null; // neueste gespeicherte Empfehlung
-  let season = null; // neuester Saisonplan (Wochenziele fließen in die Empfehlung ein)
-  let geminiBusy = false;
-  let geminiError = "";
-  let geminiStatus = "";
-  let waitStartedMs = 0;
-  let waitTimer = null;
-
-  let busyMode = null;
-
-  async function requestRecommendation(mode) {
-    busyMode = mode;
-    geminiBusy = true;
-    geminiError = "";
-    geminiStatus = "";
-    renderResults();
-    // Wartezeit sichtbar hochzählen
-    waitTimer = setInterval(() => {
-      const statusEl = container.querySelector("#gemini-status");
-      if (statusEl && waitStartedMs) {
-        statusEl.textContent = `${geminiStatus} ${Math.round((Date.now() - waitStartedMs) / 1000)} s`;
-      }
-    }, 1000);
-    try {
-      const summary = summaryForAi(activities, profile, { seasonContext: currentSeasonContext(season?.plan) });
-      const { recommendation, model } = await getRecommendation(summary, {
-        mode,
-        onStatus: (text, info) => {
-          geminiStatus = text;
-          if (info?.waitingFor) waitStartedMs = Date.now();
-          renderResults();
-        },
-      });
-      const id = await saveAnalysis({ model, mode, summary, recommendation });
-      latest = { id, model, mode, recommendation, createdAtMs: Date.now() };
-    } catch (error) {
-      geminiError = error.message;
-    } finally {
-      clearInterval(waitTimer);
-      geminiBusy = false;
-      geminiStatus = "";
-      waitStartedMs = 0;
-      renderResults();
-    }
-  }
 
   function renderGeminiCard() {
-    const card = el("section", { className: "card" }, el("h2", { text: "Empfehlungen von Gemini" }));
-    const buttons = Object.entries(ANALYSIS_MODES).map(([mode, cfg]) => {
-      const b = el("button", {
-        className: mode === "quick" ? "button" : "button button-secondary",
-        text: geminiBusy && busyMode === mode ? "Gemini denkt nach …" : `${cfg.label} (${cfg.hint})`,
-      });
-      b.type = "button";
-      b.disabled = geminiBusy;
-      b.addEventListener("click", () => requestRecommendation(mode));
-      return b;
-    });
-    card.append(el("div", { className: "button-row" }, ...buttons));
+    const card = el("section", { className: "card" }, el("h2", { text: "Einschätzung von Gemini" }));
+    const link = el("a", { className: "button button-secondary", text: "Zum Trainingsplan →" });
+    link.href = "#plan";
 
-    if (!profile.maxHeartrate) {
-      card.append(el("p", { className: "muted", text: "Tipp: Mit eingetragener Max-HF werden die Empfehlungen deutlich genauer." }));
-    }
-    if (geminiBusy && geminiStatus) {
-      const status = el("p", { className: "muted", text: geminiStatus });
-      status.id = "gemini-status";
-      card.append(status);
-    }
-    if (geminiError) card.append(el("p", { className: "message error", text: geminiError }));
     if (!latest) {
       card.append(
-        el("p", {
-          className: "muted",
-          text: "Gesendet wird nur eine kompakte Zusammenfassung dieser Auswertung – ohne Aktivitäts- und Wettkampfnamen, ohne Orte und GPS-Daten.",
-        }),
+        el("p", { className: "muted", text: "Noch keine Einschätzung. Sie entsteht zusammen mit dem Tagesplan auf der Seite „Trainingsplan“." }),
+        el("div", { className: "button-row" }, link),
       );
       return card;
     }
@@ -428,61 +357,27 @@ export function render(container) {
     const when = latest.createdAtMs ? new Date(latest.createdAtMs).toLocaleString("de-DE") : "";
     const loadLevel = { "zu niedrig": "low", angemessen: "ok", "erhöht": "warn", "zu hoch": "high" }[r.loadAssessment] ?? "";
     card.append(
-      el("p", {
-        className: "muted",
-        text: `Stand ${when} · ${ANALYSIS_MODES[latest.mode]?.label ?? "Analyse"} · ${latest.model}`,
-      }),
+      el("p", { className: "muted", text: `Stand ${when} · ${ANALYSIS_MODES[latest.mode]?.label ?? "Analyse"} · ${latest.model}` }),
       el("p", {}, "Belastung: ", el("span", { className: `badge ${loadLevel}`, text: r.loadAssessment })),
       el("p", { text: r.assessment }),
     );
     if (r.strengths.length) card.append(el("h3", { text: "Stärken" }), el("ul", {}, ...r.strengths.map((t) => el("li", { text: t }))));
     if (r.risks.length) card.append(el("h3", { text: "Worauf achten" }), el("ul", {}, ...r.risks.map((t) => el("li", { text: t }))));
-
-    const dayLabel = (iso) =>
-      new Date(`${iso}T00:00:00Z`).toLocaleDateString("de-DE", { timeZone: "UTC", weekday: "short", day: "2-digit", month: "2-digit" });
-    // optionalExtra/extraBudget fehlen in älteren gespeicherten Empfehlungen → defensiv anzeigen
-    const extraText = (s) =>
-      s.optionalExtra ? `+ ${s.optionalExtra.title} (${s.optionalExtra.durationMin} min): ${s.optionalExtra.description}` : "–";
     card.append(
-      el("h3", { text: "Nächste 7 Tage" }),
-      el("p", { className: "muted", text: "Kerneinheit = Grundplan. „Optional“ nur, wenn du dich gut fühlst und Lust auf mehr hast." }),
-      table(
-        [["Tag"], ["Sport"], ["Kerneinheit"], ["Dauer", "num"], ["Intensität"], ["Ablauf"], ["Optional"]],
-        r.nextSessions.map((s) => [
-          [dayLabel(s.date)],
-          [s.sport],
-          [s.title],
-          [s.durationMin ? `${s.durationMin} min` : "–", "num"],
-          [s.intensity],
-          [s.description, "wrap"],
-          [extraText(s), "wrap optional"],
-        ]),
-      ),
-      ...(r.extraBudget
-        ? [
-            el("h3", { text: "Spielraum für Extras diese Woche" }),
-            el(
-              "p",
-              {},
-              el("strong", { text: r.extraBudget.maxExtraHours ? `bis zu ${fmt(r.extraBudget.maxExtraHours, 1)} h zusätzlich` : "keine Extras" }),
-              ` – ${r.extraBudget.guidance}`,
-            ),
-          ]
-        : []),
       el("h3", { text: "Schwerpunkt der nächsten Wochen" }),
       el("p", { text: r.focusNextWeeks }),
-      el("p", { className: "muted", text: "KI-Empfehlung ohne Gewähr – hör auf deinen Körper und passe bei Bedarf an." }),
+      el("p", { className: "muted", text: "Den Tagesplan dazu (mit Abhaken) findest du im Trainingsplan. KI-Einschätzung ohne Gewähr." }),
+      el("div", { className: "button-row" }, link),
     );
     return card;
   }
 
   async function load() {
     try {
-      [profile, activities, latest, season] = await Promise.all([
+      [profile, activities, latest] = await Promise.all([
         getProfile(),
         listActivities({ max: MAX_ACTIVITIES }),
         latestAnalysis(),
-        latestSeasonPlan(),
       ]);
       fillForm();
       renderResults();

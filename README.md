@@ -200,5 +200,9 @@ den Hinweis „Firebase ist noch nicht konfiguriert“.
    bis zum Laufwettkampf (Phasen, Lauf-km, langer Lauf, Rad-Stunden, Schlüsseleinheiten,
    Entlastungswochen; max. 30 Wochen), gespeichert in `users/{uid}/plans`. Soll/Ist und Erfüllung
    pro Woche, Saison-Quote. Die 7-Tage-Empfehlung richtet sich nach den aktuellen Wochenzielen.
+11. ~~Ein Plan, neues Design~~ – **umgesetzt:** Geplant wird nur noch auf der Seite „Trainingsplan“
+    (Saisonplan → Wochenziele → Tagesplan; „Saisonplan erstellen“ legt den Tagesplan automatisch an).
+    Die Analyse-Seite zeigt nur Zahlen und die Gemini-Einschätzung. „Deep Blue“-Design mit Dark Mode,
+    Schriften Inter/Space Grotesk über Google Fonts.
 10. ~~Login-Sperre~~ – **umgesetzt:** ohne Anmeldung leitet jede Seite auf `#login` um; nach dem
     Login geht es zur ursprünglich gewünschten Seite zurück. Ohne Firebase-Konfiguration frei.

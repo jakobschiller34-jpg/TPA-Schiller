@@ -3,25 +3,58 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0f2a6b" />
     <title>TPA – Trainingsplaner</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%232563eb'/%3E%3Cstop offset='1' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='40' height='40' rx='11' fill='url(%23g)'/%3E%3Cpath d='M7 21h7l3-8 5 15 3-9h8' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap"
+    />
     <link rel="stylesheet" href="css/style.css" />
   </head>
   <body>
     <header class="site-header">
       <div class="header-top">
-        <a class="brand" href="#aktivitaeten">TPA Trainingsplaner</a>
+        <a class="brand" href="#plan" aria-label="TPA Trainingsplaner – zum Trainingsplan">
+          <svg class="brand-logo" viewBox="0 0 40 40" aria-hidden="true">
+            <defs>
+              <linearGradient id="brand-gradient" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#3b82f6" />
+                <stop offset="1" stop-color="#06b6d4" />
+              </linearGradient>
+            </defs>
+            <rect width="40" height="40" rx="11" fill="url(#brand-gradient)" />
+            <path
+              d="M7 21h7l3-8 5 15 3-9h8"
+              fill="none"
+              stroke="#fff"
+              stroke-width="3"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <span class="brand-text">
+            <span class="brand-name">TPA</span>
+            <span class="brand-sub">Trainingsplaner</span>
+          </span>
+        </a>
         <div class="user-status">
           <span id="user-name" class="muted">Nicht angemeldet</span>
           <button id="logout-button" class="button button-small" type="button" hidden>Abmelden</button>
         </div>
       </div>
       <nav class="main-nav" aria-label="Hauptnavigation">
-        <a href="#login" data-route="login">Login</a>
-        <a href="#verbinden" data-route="verbinden">Strava verbinden</a>
+        <a href="#plan" data-route="plan">Trainingsplan</a>
         <a href="#aktivitaeten" data-route="aktivitaeten">Aktivitäten</a>
         <a href="#analyse" data-route="analyse">Analyse</a>
-        <a href="#plan" data-route="plan">Trainingsplan</a>
+        <a href="#verbinden" data-route="verbinden">Strava</a>
         <a href="#einstellungen" data-route="einstellungen">Einstellungen</a>
+        <a href="#login" data-route="login">Login</a>
       </nav>
     </header>
 

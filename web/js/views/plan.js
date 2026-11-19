@@ -5,12 +5,13 @@ import {
   listActivities,
   listAnalyses,
   onUserChanged,
+  saveAnalysis,
   saveSeasonPlan,
   setPlanCheck,
 } from "../firebase.js";
-import { ANALYSIS_MODES, getSeasonPlan } from "../gemini.js";
+import { ANALYSIS_MODES, getRecommendation, getSeasonPlan } from "../gemini.js";
 import { disciplineStats, evaluatePlan, historyStats, STATUS_INFO } from "../plan-tracking.js";
-import { evaluateSeason, seasonStats, seasonWeekStarts } from "../season.js";
+import { currentSeasonContext, evaluateSeason, seasonStats, seasonWeekStarts, weekActuals } from "../season.js";
 
 const SPORT_SHORT = { Run: "Lauf", TrailRun: "Traillauf", Ride: "Rad", VirtualRide: "Rad (virtuell)", GravelRide: "Gravel", MountainBikeRide: "MTB", Walk: "Gehen", Hike: "Wandern", WeightTraining: "Kraft", Workout: "Training", Yoga: "Yoga" };
 
@@ -68,6 +69,57 @@ export function render(container) {
   let seasonBusy = null; // Modus, der gerade läuft
   let seasonStatus = "";
   let seasonError = "";
+  let dayBusy = null; // Modus der laufenden Tagesplan-Erstellung
+  let dayStatus = "";
+  let dayError = "";
+  let waitStartedMs = 0;
+
+  // Wartezeit sichtbar hochzählen (für beide Gemini-Aufrufe)
+  const waitTimer = setInterval(() => {
+    if (!container.isConnected) {
+      clearInterval(waitTimer);
+      return;
+    }
+    const statusEl = container.querySelector(".gemini-status");
+    if (statusEl && waitStartedMs) {
+      statusEl.textContent = `${statusEl.dataset.text} ${Math.round((Date.now() - waitStartedMs) / 1000)} s`;
+    }
+  }, 1000);
+
+  function statusLine(text) {
+    const p = el("p", { className: "muted gemini-status", text });
+    p.dataset.text = text;
+    return p;
+  }
+
+  // ---------- Tagesplan (7 Tage) erstellen ----------
+
+  async function createDayPlan(mode) {
+    dayBusy = mode;
+    dayError = "";
+    dayStatus = "Erstelle Tagesplan …";
+    renderPage();
+    try {
+      const summary = summaryForAi(activities, profile, { seasonContext: currentSeasonContext(season?.plan) });
+      const { recommendation, model } = await getRecommendation(summary, {
+        mode,
+        onStatus: (text, info) => {
+          dayStatus = text;
+          if (info?.waitingFor) waitStartedMs = Date.now();
+          renderPage();
+        },
+      });
+      const id = await saveAnalysis({ model, mode, summary, recommendation });
+      analyses.unshift({ id, model, mode, summary, recommendation, checks: {}, createdAtMs: Date.now() });
+    } catch (error) {
+      dayError = error.message;
+    } finally {
+      dayBusy = null;
+      dayStatus = "";
+      waitStartedMs = 0;
+      renderPage();
+    }
+  }
 
   function showMessage(text, kind = "error") {
     message.textContent = text;
@@ -98,8 +150,9 @@ export function render(container) {
       const summary = summaryForAi(activities, profile);
       const { plan, model } = await getSeasonPlan(summary, weekStarts, {
         mode,
-        onStatus: (text) => {
+        onStatus: (text, info) => {
           seasonStatus = text;
+          if (info?.waitingFor) waitStartedMs = Date.now();
           renderPage();
         },
       });
@@ -110,8 +163,11 @@ export function render(container) {
     } finally {
       seasonBusy = null;
       seasonStatus = "";
+      waitStartedMs = 0;
       renderPage();
     }
+    // Ein Plan aus einem Guss: nach dem Saisonplan direkt die Tage dieser Woche planen.
+    if (!seasonError && season) await createDayPlan("quick");
   }
 
   function seasonButtons() {
@@ -122,7 +178,7 @@ export function render(container) {
           text: seasonBusy === mode ? "Gemini plant …" : `${season ? "Neu planen" : "Saisonplan erstellen"}: ${cfg.label.replace(" Analyse", "")} (${cfg.hint})`,
         });
         b.type = "button";
-        b.disabled = Boolean(seasonBusy);
+        b.disabled = Boolean(seasonBusy || dayBusy);
         b.addEventListener("click", () => createSeasonPlan(mode));
         return b;
       }));
@@ -142,7 +198,7 @@ export function render(container) {
       card.append(el("p", { text: `${weekStarts.length} Wochen bis zum Wettkampf am ${shortDate(raceDate)}. Gemini plant Phasen und Wochenziele (Lauf-km, langer Lauf, Rad-Stunden, Schlüsseleinheiten). Die 7-Tage-Empfehlung richtet sich danach.` }));
     }
     card.append(seasonButtons());
-    if (seasonBusy && seasonStatus) card.append(el("p", { className: "muted", text: seasonStatus }));
+    if (seasonBusy && seasonStatus) card.append(statusLine(seasonStatus));
     if (seasonError) card.append(el("p", { className: "message error", text: seasonError }));
     if (!season) return card;
 
@@ -156,7 +212,8 @@ export function render(container) {
     card.append(el("ul", {}, ...plan.phases.map((ph) =>
       el("li", {}, el("strong", { text: `${ph.name} (Woche ${ph.fromWeek}${ph.toWeek !== ph.fromWeek ? `–${ph.toWeek}` : ""}): ` }), ph.goal))));
 
-    const sollIst = (soll, ist, digits = 0) => `${num(soll, digits)} / ${num(ist, digits)}`;
+    // Einheitlich mit „Diese Woche“: Ist / Soll
+    const sollIst = (soll, ist, digits = 0) => `${num(ist, digits)} / ${num(soll, digits)}`;
     const rows = evaluated.map((w, i) => {
       const fulfil = w.state === "future" ? "" : pct(w.fulfilment);
       return el("tr", { className: w.state === "current" ? "is-today" : "" },
@@ -174,14 +231,61 @@ export function render(container) {
     seasonTable.classList.add("season-table");
     card.append(
       seasonTable,
-      el("p", { className: "muted", text: "Vergangene/laufende Wochen: Soll / Ist. „Lang“ = längster Lauf (km). Erfüllung = Ø aus Lauf-km, langem Lauf und Rad-Stunden (je max. 100 %)." }),
+      el("p", { className: "muted", text: "Vergangene/laufende Wochen: Ist / Soll. „Lang“ = längster Lauf (km). Erfüllung = Ø aus Lauf-km, langem Lauf und Rad-Stunden (je max. 100 %)." }),
       el("p", {}, el("strong", { text: "Wettkampf: " }), plan.raceStrategy));
     return card;
   }
 
-  // ---------- Wochenplan (7 Tage aus der Empfehlung) ----------
+  // ---------- Diese Woche: Wochenziele + Tagesplan ----------
 
-  function renderWeekCard(current, days) {
+  function dayPlanButtons(hasPlan) {
+    return el("div", { className: "button-row" },
+      ...Object.entries(ANALYSIS_MODES).map(([mode, cfg]) => {
+        const b = el("button", {
+          className: mode === "quick" ? "button" : "button button-secondary",
+          text: dayBusy === mode ? "Gemini plant …" : `${hasPlan ? "Tagesplan aktualisieren" : "Tagesplan erstellen"}: ${cfg.label.replace(" Analyse", "")} (${cfg.hint})`,
+        });
+        b.type = "button";
+        b.disabled = Boolean(seasonBusy || dayBusy);
+        b.addEventListener("click", () => createDayPlan(mode));
+        return b;
+      }));
+  }
+
+  function renderWeekTargets(ctx) {
+    const w = ctx.thisWeek;
+    const actual = weekActuals(w.weekStart, activities);
+    return el("div", { className: "week-targets" },
+      el("p", { className: "eyebrow", text: `Woche ${ctx.weekNumber} von ${ctx.totalWeeks} · ${w.phase}${w.recoveryWeek ? " · Entlastungswoche" : ""}` }),
+      el("p", { text: w.focus }),
+      el("div", { className: "target-row" },
+        el("span", { className: "target" }, el("strong", { text: `${num(actual.runKm)} / ${num(w.runKm)} km` }), " Lauf"),
+        el("span", { className: "target" }, el("strong", { text: `${num(actual.longRunKm)} / ${num(w.longRunKm)} km` }), " langer Lauf"),
+        el("span", { className: "target" }, el("strong", { text: `${num(actual.rideHours, 1)} / ${num(w.rideHours, 1)} h` }), " Rad")),
+      el("p", { className: "muted", text: `Schlüsseleinheiten: ${w.keySessions.join(" · ")}` }));
+  }
+
+  function renderWeekCard(current, days, ctx) {
+    const card = el("section", { className: "card" }, el("h2", { text: "Diese Woche" }));
+    if (ctx) card.append(renderWeekTargets(ctx));
+    else if (season) card.append(el("p", { className: "muted", text: "Die aktuelle Woche liegt außerhalb des Saisonplans." }));
+    else card.append(el("p", { className: "muted", text: "Ohne Saisonplan plant Gemini die Tage nur anhand deiner bisherigen Daten. Erstelle unten einen Saisonplan für Wochenziele bis zum Wettkampf." }));
+
+    // Hinweise: abgelaufen oder älter als der aktuelle Saisonplan
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const lastDay = current?.recommendation.nextSessions.at(-1)?.date;
+    if (current && lastDay && lastDay < today) {
+      card.append(el("p", { className: "message error", text: "Der Tagesplan ist abgelaufen – bitte aktualisieren." }));
+    } else if (current && season && (current.createdAtMs ?? 0) < (season.createdAtMs ?? 0)) {
+      card.append(el("p", { className: "message", text: "Der Tagesplan ist älter als der Saisonplan – aktualisiere ihn, damit er zu den neuen Wochenzielen passt." }));
+    }
+
+    card.append(dayPlanButtons(Boolean(current)));
+    if (dayBusy && dayStatus) card.append(statusLine(dayStatus));
+    if (dayError) card.append(el("p", { className: "message error", text: dayError }));
+    if (!current) return card;
+
     const checks = current.checks ?? {};
     const rows = days.map((d) => {
       const s = d.session;
@@ -219,15 +323,15 @@ export function render(container) {
     });
 
     const when = current.createdAtMs ? new Date(current.createdAtMs).toLocaleString("de-DE") : "";
-    const card = el("section", { className: "card" },
-      el("h2", { text: "Diese Woche (7-Tage-Plan)" }),
+    card.append(
+      el("h3", { text: "Tagesplan" }),
       el("p", { className: "muted", text: `Erstellt ${when} · ${ANALYSIS_MODES[current.mode]?.label ?? "Analyse"} · ${current.model}` }),
       table([["Tag"], ["Plan"], ["Ist (Strava)"], ["Status"], ["Optional"], ["Abhaken"]], rows),
       el("p", { className: "muted", text: "Automatisch abgehakt wird anhand der importierten Aktivitäten (Seite „Aktivitäten“ → importieren). Mit ✓/✗ überstimmst du die Automatik, ↺ setzt zurück." }));
     if (current.recommendation.extraBudget) {
       card.append(el("p", {},
         el("strong", { text: "Spielraum für Extras: " }),
-        `bis zu ${current.recommendation.extraBudget.maxExtraHours} h – ${current.recommendation.extraBudget.guidance}`));
+        `bis zu ${num(current.recommendation.extraBudget.maxExtraHours, 1)} h – ${current.recommendation.extraBudget.guidance}`));
     }
     return card;
   }
@@ -253,16 +357,12 @@ export function render(container) {
     const discipline = el("section", { className: "card" },
       el("h2", { text: "Disziplin" }),
       el("div", { className: "stats" },
-        statTile("Diese Woche", weekStats.rate, dayNote(weekStats, current ? "Noch kein Tag vorbei" : "Noch kein 7-Tage-Plan")),
+        statTile("Diese Woche", weekStats.rate, dayNote(weekStats, current ? "Noch kein Tag vorbei" : "Noch kein Tagesplan")),
         statTile("Letzte 4 Wochen", history.rate, dayNote(history, "Noch keine Daten")),
         statTile("Saison", seasonRate.rate, season ? (seasonRate.weeks ? `${seasonRate.weeks} abgeschlossene Wochen, Ø Erfüllung der Wochenziele` : "Noch keine Woche abgeschlossen") : "Noch kein Saisonplan")),
       el("p", { className: "muted", text: "Tage: voll erfüllt = 1, teilweise/anders trainiert = ½, verpasst/ausgelassen = 0; heute und künftige Tage zählen noch nicht. Saison: Ø Erfüllung der Wochenziele." }));
 
-    const weekCard = current
-      ? renderWeekCard(current, days)
-      : el("section", { className: "card" },
-          el("h2", { text: "Diese Woche (7-Tage-Plan)" }),
-          el("p", { className: "muted", text: "Erstelle unter „Analyse“ eine Empfehlung – die 7 Tage daraus erscheinen hier zum Abhaken." }));
+    const weekCard = renderWeekCard(current, days, currentSeasonContext(season?.plan));
 
     content.replaceChildren(discipline, weekCard, renderSeasonCard(evaluatedSeason));
   }
