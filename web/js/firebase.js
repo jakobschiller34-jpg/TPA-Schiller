@@ -259,5 +259,29 @@ export async function setPlanCheck(analysisId, date, check) {
   return checks;
 }
 
-// TODO: Firestore-Hilfsfunktionen für plans:
-//   users/{uid}/plans/{planId}
+// ---------- Saisonpläne: users/{uid}/plans/{autoId} ----------
+
+function plansRef(uid) {
+  return collection(db, "users", uid, "plans");
+}
+
+/** Speichert einen Saisonplan. Ältere Pläne bleiben erhalten; angezeigt wird der neueste. */
+export async function saveSeasonPlan({ model, mode = null, raceDate, plan }) {
+  const user = requireUser();
+  const ref = await addDoc(plansRef(user.uid), {
+    model,
+    mode,
+    raceDate,
+    plan,
+    createdAt: serverTimestamp(),
+    createdAtMs: Date.now(),
+  });
+  return ref.id;
+}
+
+/** Neuester Saisonplan (mit `id`) oder null. */
+export async function latestSeasonPlan() {
+  const user = requireUser();
+  const snapshot = await getDocs(query(plansRef(user.uid), orderBy("createdAtMs", "desc"), limit(1)));
+  return snapshot.empty ? null : { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+}

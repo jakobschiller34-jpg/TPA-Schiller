@@ -45,6 +45,7 @@ flowchart LR
 | `web/js/hr-details.js` | HF-Streams nachladen, Histogramme speichern |
 | `web/js/views/rating.js` | Kasten „Noch zu bewerten“ (Anstrengung/Notiz) |
 | `web/js/plan-tracking.js` | Planerfüllung und Disziplin (reine Berechnungen) |
+| `web/js/season.js` | Saisonplan: Wochenliste, Soll/Ist (reine Berechnungen) |
 | `web/js/gemini.js` | Gerüst: Gemini Interactions API, Modell- und Prompt-Konstanten |
 | `web/js/views/*.js` | je ein Modul pro Seite |
 | `firestore.rules` | Security Rules zum Einfügen in der Firebase-Konsole |
@@ -60,7 +61,7 @@ flowchart LR
 users/{uid}                           Profil & Ziele (Max-HF, Ruhepuls, Wettkampf)
 users/{uid}/activities/{activityId}   normalisierte Strava-Aktivitäten
 users/{uid}/analyses/{analysisId}     Auswertungen und KI-Empfehlungen
-users/{uid}/plans/{planId}            Trainingspläne
+users/{uid}/plans/{planId}            Saisonpläne (Wochenziele bis zum Wettkampf)
 users/{uid}/private/secrets           Strava Client ID/Secret, Gemini API-Key
 ```
 
@@ -195,5 +196,9 @@ den Hinweis „Firebase ist noch nicht konfiguriert“.
    Plantage werden automatisch mit importierten Aktivitäten abgeglichen (Sportart, ≥ 70 % Dauer;
    Ruhetage, Extras), manuell per ✓/✗ überstimmbar (`checks` im Analyse-Dokument). Disziplin-Quote
    für den aktuellen Plan und die letzten 4 Wochen (neuerer Plan gilt ab seinem ersten Tag).
-9. Mehrwöchigen Trainingsplan (bis zum Wettkampf) als JSON erzeugen, speichern und anzeigen.
-10. Login-Guard im Router: nicht angemeldete Nutzer auf `#login` umleiten.
+9. ~~Saisonplan~~ – **umgesetzt** (`web/js/season.js`, Seite „Trainingsplan“): Gemini plant alle Wochen
+   bis zum Laufwettkampf (Phasen, Lauf-km, langer Lauf, Rad-Stunden, Schlüsseleinheiten,
+   Entlastungswochen; max. 30 Wochen), gespeichert in `users/{uid}/plans`. Soll/Ist und Erfüllung
+   pro Woche, Saison-Quote. Die 7-Tage-Empfehlung richtet sich nach den aktuellen Wochenzielen.
+10. ~~Login-Sperre~~ – **umgesetzt:** ohne Anmeldung leitet jede Seite auf `#login` um; nach dem
+    Login geht es zur ursprünglich gewünschten Seite zurück. Ohne Firebase-Konfiguration frei.

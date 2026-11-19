@@ -308,7 +308,7 @@ const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
  * Kompakte, anonymisierte Zusammenfassung für Gemini.
  * Enthält KEINE Aktivitäts- oder Wettkampfnamen, keine Orte, keine GPS-Daten.
  */
-export function summaryForAi(activities, profile, { now = new Date() } = {}) {
+export function summaryForAi(activities, profile, { now = new Date(), seasonContext = null } = {}) {
   const a = analyze(activities, profile, { now });
   const today = todayDay(now);
   const zonePct = (bucket) => {
@@ -399,5 +399,6 @@ export function summaryForAi(activities, profile, { now = new Date() } = {}) {
         rpeLoad: w.rpeCount ? round(w.rpeLoad) : null,
       })),
     last14Days: recent,
+    seasonPlan: seasonContext, // Wochenziele aus dem Saisonplan (season.currentSeasonContext) oder null
   };
 }

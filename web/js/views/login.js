@@ -72,7 +72,15 @@ export function render(container) {
     try {
       await loginWithEmail(form.email.value.trim(), form.password.value);
       form.reset();
-      location.hash = "#aktivitaeten";
+      // Zurück zur ursprünglich gewünschten Seite (von der Login-Sperre gemerkt)
+      let target = "aktivitaeten";
+      try {
+        target = sessionStorage.getItem("tpa.returnTo") || target;
+        sessionStorage.removeItem("tpa.returnTo");
+      } catch {
+        /* ignorieren */
+      }
+      location.hash = `#${target}`;
     } catch (error) {
       showMessage(authErrorMessage(error));
     } finally {

@@ -477,3 +477,21 @@ details.card[open] > summary {
 .table td.optional {
   min-width: 9rem;
 }
+
+ul.compact {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+ul.compact li {
+  margin: 0;
+}
+
+.season-table td.wrap {
+  min-width: 8rem;
+}
+
+.season-table th,
+.season-table td {
+  padding: 0.4rem 0.45rem;
+}

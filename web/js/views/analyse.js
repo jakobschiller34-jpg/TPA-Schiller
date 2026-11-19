@@ -1,5 +1,14 @@
 import { analyze, SPORT_GROUPS, summaryForAi, ZONES } from "../analysis.js";
-import { getProfile, latestAnalysis, listActivities, onUserChanged, saveAnalysis, saveProfile } from "../firebase.js";
+import {
+  getProfile,
+  latestAnalysis,
+  latestSeasonPlan,
+  listActivities,
+  onUserChanged,
+  saveAnalysis,
+  saveProfile,
+} from "../firebase.js";
+import { currentSeasonContext } from "../season.js";
 import { ANALYSIS_MODES, getRecommendation } from "../gemini.js";
 
 const MAX_ACTIVITIES = 1000;
@@ -337,6 +346,7 @@ export function render(container) {
   // ---------- Gemini-Empfehlungen ----------
 
   let latest = null; // neueste gespeicherte Empfehlung
+  let season = null; // neuester Saisonplan (Wochenziele fließen in die Empfehlung ein)
   let geminiBusy = false;
   let geminiError = "";
   let geminiStatus = "";
@@ -359,7 +369,7 @@ export function render(container) {
       }
     }, 1000);
     try {
-      const summary = summaryForAi(activities, profile);
+      const summary = summaryForAi(activities, profile, { seasonContext: currentSeasonContext(season?.plan) });
       const { recommendation, model } = await getRecommendation(summary, {
         mode,
         onStatus: (text, info) => {
@@ -468,10 +478,11 @@ export function render(container) {
 
   async function load() {
     try {
-      [profile, activities, latest] = await Promise.all([
+      [profile, activities, latest, season] = await Promise.all([
         getProfile(),
         listActivities({ max: MAX_ACTIVITIES }),
         latestAnalysis(),
+        latestSeasonPlan(),
       ]);
       fillForm();
       renderResults();
