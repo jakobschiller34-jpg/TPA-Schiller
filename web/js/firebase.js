@@ -12,6 +12,7 @@ import {
   signOut,
 } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-auth.js";
 import {
+  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -208,6 +209,55 @@ export async function saveProfile(profile) {
   await setDoc(userRef(user.uid), { profile, profileUpdatedAt: serverTimestamp() }, { merge: true });
 }
 
-// TODO: Firestore-Hilfsfunktionen für analyses und plans:
-//   users/{uid}/analyses/{analysisId}
+// ---------- Empfehlungen: users/{uid}/analyses/{autoId} ----------
+
+function analysesRef(uid) {
+  return collection(db, "users", uid, "analyses");
+}
+
+/** Speichert eine KI-Empfehlung samt der gesendeten Zusammenfassung. */
+export async function saveAnalysis({ model, mode = null, summary, recommendation }) {
+  const user = requireUser();
+  // createdAtMs zusätzlich, damit das Datum sofort (vor Server-Bestätigung) anzeigbar ist.
+  const ref = await addDoc(analysesRef(user.uid), {
+    model,
+    mode,
+    summary,
+    recommendation,
+    createdAt: serverTimestamp(),
+    createdAtMs: Date.now(),
+  });
+  return ref.id;
+}
+
+/** Gespeicherte Empfehlungen, neueste zuerst, jeweils mit `id`. */
+export async function listAnalyses({ max = 20 } = {}) {
+  const user = requireUser();
+  const snapshot = await getDocs(query(analysesRef(user.uid), orderBy("createdAtMs", "desc"), limit(max)));
+  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+/** Neueste gespeicherte Empfehlung (mit `id`) oder null. */
+export async function latestAnalysis() {
+  const [latest] = await listAnalyses({ max: 1 });
+  return latest ?? null;
+}
+
+/**
+ * Setzt das manuelle Häkchen eines Plantags: { status: "done"|"skipped"|null, extra: true|false|null }.
+ * null entfernt die manuelle Angabe (zurück zur Automatik).
+ */
+export async function setPlanCheck(analysisId, date, check) {
+  const user = requireUser();
+  const clean = Object.fromEntries(Object.entries(check).filter(([, v]) => v !== null && v !== undefined));
+  const ref = doc(analysesRef(user.uid), analysisId);
+  const snapshot = await getDoc(ref);
+  const checks = { ...(snapshot.data()?.checks ?? {}) };
+  if (Object.keys(clean).length) checks[date] = clean;
+  else delete checks[date];
+  await setDoc(ref, { checks }, { merge: true });
+  return checks;
+}
+
+// TODO: Firestore-Hilfsfunktionen für plans:
 //   users/{uid}/plans/{planId}

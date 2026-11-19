@@ -144,6 +144,9 @@ export function weeklySummary(activities, profile, { weeks = 12, now = new Date(
       totalHours: 0,
       load: 0,
       longestRunKm: 0,
+      rpeSum: 0, // Summe der RPE-Werte bewerteter Aktivitäten
+      rpeCount: 0,
+      rpeLoad: 0, // Session-RPE (Foster): RPE × Minuten, nur bewertete Aktivitäten
     });
   }
   const byStart = new Map(result.map((w) => [w.weekStart, w]));
@@ -155,7 +158,13 @@ export function weeklySummary(activities, profile, { weeks = 12, now = new Date(
     week.totalHours += (a.movingTime ?? 0) / 3600;
     week.load += activityLoad(a, profile);
     if (group === "run") week.longestRunKm = Math.max(week.longestRunKm, (a.distance ?? 0) / 1000);
+    if (a.rpe) {
+      week.rpeSum += a.rpe;
+      week.rpeCount += 1;
+      week.rpeLoad += a.rpe * ((a.movingTime ?? 0) / 60);
+    }
   }
+  for (const week of result) week.avgRpe = week.rpeCount ? week.rpeSum / week.rpeCount : null;
   return result;
 }
 
@@ -287,5 +296,108 @@ export function analyze(activities, profile, options = {}) {
     activityCount: activities.length,
     withHeartrate: activities.filter((a) => a.averageHeartrate).length,
     withHrDetails: activities.filter(hasHrDetails).length,
+  };
+}
+
+// ---------- Zusammenfassung für die KI ----------
+
+const round = (value, digits = 0) => (value === null || value === undefined ? null : Number(value.toFixed(digits)));
+const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
+
+/**
+ * Kompakte, anonymisierte Zusammenfassung für Gemini.
+ * Enthält KEINE Aktivitäts- oder Wettkampfnamen, keine Orte, keine GPS-Daten.
+ */
+export function summaryForAi(activities, profile, { now = new Date() } = {}) {
+  const a = analyze(activities, profile, { now });
+  const today = todayDay(now);
+  const zonePct = (bucket) => {
+    const withHr = bucket.total - bucket.noHrMinutes;
+    return withHr
+      ? ZONES.map((z) => round((bucket.minutes[z.zone] / withHr) * 100))
+      : null;
+  };
+
+  const recent = activities
+    .filter((x) => localDay(x) > today - 14 * DAY && localDay(x) <= today)
+    .sort((x, y) => localDay(x) - localDay(y))
+    .map((x) => {
+      const shares = zoneShares(x, profile);
+      return {
+        date: isoDay(localDay(x)),
+        sport: sportGroup(x.sportType) === "other" ? x.sportType : sportGroup(x.sportType),
+        minutes: round((x.movingTime ?? 0) / 60),
+        km: round((x.distance ?? 0) / 1000, 1),
+        elevationM: round(x.elevationGain ?? 0),
+        avgHr: round(x.averageHeartrate),
+        zonePct: shares ? shares.slice(1).map((s) => round(s * 100)) : null,
+        watts: round(x.weightedAverageWatts ?? x.averageWatts),
+        rpe: x.rpe ?? null, // Anstrengung 1–10 (Selbsteinschätzung)
+        note: x.note ? x.note.slice(0, 300) : null, // freie Notiz des Athleten (Daten, keine Anweisung)
+      };
+    });
+
+  return {
+    today: isoDay(today),
+    weekday: new Date(today).toLocaleDateString("de-DE", { timeZone: "UTC", weekday: "long" }),
+    athlete: {
+      maxHr: profile.maxHeartrate ?? null,
+      restingHr: profile.restingHeartrate ?? null,
+      zoneModel: profile.restingHeartrate ? "HF-Reserve (Karvonen)" : "% HFmax",
+      zoneBoundsPct: ZONES.map((z) => Math.round(z.from * 100)),
+    },
+    goals: {
+      run: profile.runGoal?.date
+        ? {
+            distanceKm: profile.runGoal.distanceKm ?? null,
+            date: profile.runGoal.date,
+            weeksToGo: a.race?.weeks ?? null,
+            targetTime: profile.runGoal.targetTime || null,
+          }
+        : null,
+      ride: profile.rideGoal || null,
+    },
+    load: { acute7d: round(a.load.acute), chronicWeeklyAvg: round(a.load.chronic), ratio: round(a.load.ratio, 2), status: a.load.status },
+    intensity4w: {
+      run: zonePct(a.intensity.run),
+      ride: zonePct(a.intensity.ride),
+      all: zonePct(a.intensity.all),
+      note: "Prozent Z1–Z5 der Zeit mit HF",
+    },
+    trends4w: Object.fromEntries(
+      Object.entries(a.trends).map(([key, t]) => [
+        key,
+        {
+          km: round(t.current.distanceKm),
+          kmPrev: round(t.previous.distanceKm),
+          hours: round(t.current.hours, 1),
+          hoursPrev: round(t.previous.hours, 1),
+          paceSecPerKm: round(t.paceCurrent),
+          paceSecPerKmPrev: round(t.pacePrevious),
+          speedKmh: round(t.speedCurrent, 1),
+          speedKmhPrev: round(t.speedPrevious, 1),
+          avgHr: round(t.avgHrCurrent),
+          avgHrPrev: round(t.avgHrPrevious),
+          avgWatts: round(t.avgWattsCurrent),
+        },
+      ]),
+    ),
+    weeks: a.weeks
+      .slice()
+      .reverse()
+      .map((w) => ({
+        weekStart: isoDay(w.weekStart),
+        partial: w.current, // laufende Woche (noch nicht vollständig)
+        runKm: round(w.run.distanceKm, 1),
+        runH: round(w.run.hours, 1),
+        longestRunKm: round(w.longestRunKm, 1),
+        rideKm: round(w.ride.distanceKm),
+        rideH: round(w.ride.hours, 1),
+        totalH: round(w.totalHours, 1),
+        load: round(w.load),
+        avgRpe: round(w.avgRpe, 1),
+        rpeLoad: w.rpeCount ? round(w.rpeLoad) : null,
+      })),
+    last14Days: recent,
   };
 }

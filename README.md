@@ -43,6 +43,8 @@ flowchart LR
 | `web/js/strava.js` | Strava-OAuth, Token-Refresh, Aktivitäten laden |
 | `web/js/analysis.js` | Trainingsanalyse (reine Berechnungen) |
 | `web/js/hr-details.js` | HF-Streams nachladen, Histogramme speichern |
+| `web/js/views/rating.js` | Kasten „Noch zu bewerten“ (Anstrengung/Notiz) |
+| `web/js/plan-tracking.js` | Planerfüllung und Disziplin (reine Berechnungen) |
 | `web/js/gemini.js` | Gerüst: Gemini Interactions API, Modell- und Prompt-Konstanten |
 | `web/js/views/*.js` | je ein Modul pro Seite |
 | `firestore.rules` | Security Rules zum Einfügen in der Firebase-Konsole |
@@ -140,7 +142,8 @@ Firestore Database → **Regeln** → den Inhalt von [`firestore.rules`](firesto
    einschränken (siehe Sicherheitshinweise: Websites + nur „Generative Language API“).
 3. Den Key in der App unter **Einstellungen** eintragen und „In Firebase speichern“ klicken.
 
-Modell: `gemini-3.8-flash` (Konstante `GEMINI_MODEL` in `web/js/gemini.js`). Der kostenlose
+Modelle: „Schnelle Analyse“ mit `gemini-3.5-flash-lite`, „Gründliche Analyse“ mit `gemini-3.8-flash`
+(mittlere Denktiefe, bis 5 Min.) – konfiguriert in `ANALYSIS_MODES` in `web/js/gemini.js`. Der kostenlose
 Tarif hat Anfrage-Kontingente pro Minute und Tag – für eine Person reicht das.
 
 ### 5. GitHub Pages aktivieren
@@ -179,6 +182,18 @@ den Hinweis „Firebase ist noch nicht konfiguriert“.
    geladen und nur ein HF-Histogramm (Sekunden pro 5-bpm-Bereich) gespeichert. Zonen und
    Belastung werden daraus zeitanteilig berechnet, sonst über die Ø-HF. Nachladen in Portionen
    (80 Anfragen) wegen des Strava-Limits (~100 / 15 Min.).
-6. Gemini-Anbindung aktivieren (`callGemini()`), JSON-Antworten gegen ein Schema prüfen.
-7. Trainingsplan als JSON erzeugen, speichern und anzeigen.
-8. Login-Guard im Router: nicht angemeldete Nutzer auf `#login` umleiten.
+6. ~~Gemini-Anbindung~~ – **umgesetzt:** Button „Empfehlung von Gemini holen“ auf der Analyse-Seite.
+   Gesendet wird nur `summaryForAi()` (anonym, ~3 KB). Antwort als JSON nach festem Schema
+   (Einschätzung, Stärken, Risiken, 7 Tage Einheiten, Schwerpunkt), im Browser geprüft und in
+   `users/{uid}/analyses` gespeichert. Hinweis: Der Header `Api-Revision` wird weggelassen, da
+   Googles CORS-Preflight ihn ablehnt.
+7. ~~Feedback & erweiterbarer Plan~~ – **umgesetzt:** Kasten „Noch zu bewerten“ (RPE 1–10 +
+   optionale Notiz, gespeichert im Aktivitäts-Dokument). RPE und Notizen der letzten 14 Tage gehen
+   an Gemini (Notizen bewusst mit Einverständnis). Empfehlung mit Kerneinheit + optionalem Zusatz
+   pro Tag und Wochen-Spielraum für Extras.
+8. ~~Plan abhaken & Disziplin~~ – **umgesetzt** (`web/js/plan-tracking.js`, Seite „Trainingsplan“):
+   Plantage werden automatisch mit importierten Aktivitäten abgeglichen (Sportart, ≥ 70 % Dauer;
+   Ruhetage, Extras), manuell per ✓/✗ überstimmbar (`checks` im Analyse-Dokument). Disziplin-Quote
+   für den aktuellen Plan und die letzten 4 Wochen (neuerer Plan gilt ab seinem ersten Tag).
+9. Mehrwöchigen Trainingsplan (bis zum Wettkampf) als JSON erzeugen, speichern und anzeigen.
+10. Login-Guard im Router: nicht angemeldete Nutzer auf `#login` umleiten.

@@ -1,6 +1,7 @@
 import { currentUser, listActivities, newestActivityEpoch, onUserChanged, saveActivities } from "../firebase.js";
 import { backfillHrDetails, DEFAULT_MAX_REQUESTS, pendingHrActivities } from "../hr-details.js";
 import { fetchActivitiesSince, isConnected } from "../strava.js";
+import { renderRatingCard } from "./rating.js";
 
 const FIRST_IMPORT_DAYS = 365; // Erstimport: die letzten 12 Monate
 const LIST_LIMIT = 100; // Zeilen in der Tabelle
@@ -71,6 +72,7 @@ export function render(container) {
       <p id="act-message" class="message" role="status" hidden></p>
       <p id="act-hint" class="muted">Prüfe Login-Status …</p>
     </section>
+    <section id="act-rating" class="card" hidden></section>
     <section class="card">
       <h2 id="act-title">Gespeicherte Aktivitäten</h2>
       <div class="table-wrap">
@@ -81,6 +83,7 @@ export function render(container) {
               <th class="num">Distanz</th><th class="num">Dauer</th>
               <th class="num">Höhe</th><th class="num">Ø HF</th>
               <th title="Herzfrequenz sekundengenau ausgewertet">HF-Details</th>
+              <th class="num" title="Anstrengung 1–10">RPE</th>
             </tr>
           </thead>
           <tbody id="act-rows"></tbody>
@@ -98,6 +101,15 @@ export function render(container) {
   const title = container.querySelector("#act-title");
   const rows = container.querySelector("#act-rows");
   const empty = container.querySelector("#act-empty");
+  const ratingSection = container.querySelector("#act-rating");
+
+  const describe = (a) =>
+    `${formatDate(a.startDateLocal)} · ${SPORT_LABELS[a.sportType] ?? a.sportType} · ${a.name} · ${formatDuration(a.movingTime)}`;
+
+  function renderAll() {
+    renderRatingCard(ratingSection, allActivities, { describe, onChange: renderAll });
+    renderRows(allActivities.slice(0, LIST_LIMIT));
+  }
 
   function showMessage(text, kind = "ok") {
     message.textContent = text;
@@ -118,6 +130,7 @@ export function render(container) {
           [formatNumber(a.elevationGain, "m"), "num"],
           [formatNumber(a.averageHeartrate, "bpm"), "num"],
           [!a.averageHeartrate ? "" : a.hrHistogram ? "✓" : a.hrChecked ? "keine" : "offen"],
+          [a.rpe ? String(a.rpe) : "", "num"],
         ];
         for (const [text, cls] of cells) {
           const td = document.createElement("td");
@@ -137,7 +150,7 @@ export function render(container) {
   async function loadList() {
     try {
       allActivities = await listActivities({ max: LOAD_LIMIT });
-      renderRows(allActivities.slice(0, LIST_LIMIT));
+      renderAll();
       updateState(currentUser());
     } catch (error) {
       showMessage(`Aktivitäten konnten nicht geladen werden: ${error.message}`, "error");
@@ -166,7 +179,7 @@ export function render(container) {
     if (result.rateLimited) text += ` Strava-Limit erreicht – noch ${result.remaining} offen, bitte in 15 Minuten fortsetzen.`;
     else if (result.remaining) text += ` Noch ${result.remaining} offen – später erneut klicken (Strava erlaubt ca. 100 Anfragen pro 15 Minuten).`;
     showMessage(text, result.rateLimited ? "error" : "ok");
-    renderRows(allActivities.slice(0, LIST_LIMIT));
+    renderAll();
   }
 
   hrButton.addEventListener("click", async () => {

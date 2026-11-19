@@ -327,3 +327,153 @@ details.card[open] > summary {
   border-color: var(--danger);
   color: var(--danger);
 }
+
+.table td.wrap {
+  white-space: normal;
+  min-width: 12rem;
+}
+
+.card h3 {
+  margin: 1rem 0 0.4rem;
+  font-size: 1rem;
+}
+
+.card ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+/* ---------- Bewertung (RPE) ---------- */
+
+.rating-item {
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.rating-label {
+  margin: 0;
+  font-weight: 600;
+}
+
+.rpe-scale {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.rpe-button {
+  font: inherit;
+  min-width: 2.4rem;
+  padding: 0.35rem 0;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.rpe-button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.rpe-hint {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.rating-note {
+  font: inherit;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  width: 100%;
+}
+
+.table td.optional {
+  color: var(--muted);
+}
+
+/* ---------- Trainingsplan ---------- */
+
+.stats {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.stat {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+}
+
+.stat p {
+  margin: 0.15rem 0;
+}
+
+.stat-label {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-value.ok {
+  color: var(--ok);
+}
+
+.stat-value.warn {
+  color: #b07d00;
+}
+
+.stat-value.high {
+  color: var(--danger);
+}
+
+.small {
+  font-size: 0.8rem;
+}
+
+.button-row.nowrap {
+  flex-wrap: nowrap;
+}
+
+.button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.extra-check {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.table tr.is-today td {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.plan-actions {
+  gap: 0.25rem;
+}
+
+.plan-actions .button-small {
+  padding: 0.15rem 0.45rem;
+}
+
+.table td.optional {
+  min-width: 9rem;
+}
