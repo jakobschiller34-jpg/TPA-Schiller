@@ -155,7 +155,8 @@ function activitiesRef(uid) {
 }
 
 /**
- * Speichert normalisierte Aktivitäten (Dokument-ID = Strava-ID, vorhandene werden überschrieben).
+ * Speichert normalisierte Aktivitäten (Dokument-ID = Strava-ID).
+ * merge: zusätzliche Felder wie hrHistogram bleiben bei erneutem Import erhalten.
  * Firestore erlaubt max. 500 Schreibvorgänge pro Batch.
  */
 export async function saveActivities(activities) {
@@ -164,10 +165,16 @@ export async function saveActivities(activities) {
   for (let i = 0; i < activities.length; i += 400) {
     const batch = writeBatch(db);
     for (const activity of activities.slice(i, i + 400)) {
-      batch.set(doc(col, String(activity.id)), { ...activity, importedAt: serverTimestamp() });
+      batch.set(doc(col, String(activity.id)), { ...activity, importedAt: serverTimestamp() }, { merge: true });
     }
     await batch.commit();
   }
+}
+
+/** Ergänzt einzelne Felder einer gespeicherten Aktivität (z. B. hrHistogram). */
+export async function updateActivity(activityId, fields) {
+  const user = requireUser();
+  await setDoc(doc(activitiesRef(user.uid), String(activityId)), fields, { merge: true });
 }
 
 /** Neueste gespeicherte Aktivitäten zuerst. */
@@ -181,6 +188,24 @@ export async function listActivities({ max = 100 } = {}) {
 export async function newestActivityEpoch() {
   const [newest] = await listActivities({ max: 1 });
   return newest?.startEpoch ?? null;
+}
+
+// ---------- Profil & Ziele: users/{uid} (keine Geheimnisse) ----------
+
+function userRef(uid) {
+  return doc(db, "users", uid);
+}
+
+/** Liest das Profil ({ maxHeartrate, restingHeartrate, runGoal, rideGoal }) oder {}. */
+export async function getProfile() {
+  const user = requireUser();
+  const snapshot = await getDoc(userRef(user.uid));
+  return snapshot.exists() ? (snapshot.data().profile ?? {}) : {};
+}
+
+export async function saveProfile(profile) {
+  const user = requireUser();
+  await setDoc(userRef(user.uid), { profile, profileUpdatedAt: serverTimestamp() }, { merge: true });
 }
 
 // TODO: Firestore-Hilfsfunktionen für analyses und plans:

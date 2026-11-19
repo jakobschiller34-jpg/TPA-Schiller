@@ -1,8 +1,11 @@
 import { currentUser, listActivities, newestActivityEpoch, onUserChanged, saveActivities } from "../firebase.js";
+import { backfillHrDetails, DEFAULT_MAX_REQUESTS, pendingHrActivities } from "../hr-details.js";
 import { fetchActivitiesSince, isConnected } from "../strava.js";
 
 const FIRST_IMPORT_DAYS = 365; // Erstimport: die letzten 12 Monate
-const LIST_LIMIT = 100;
+const LIST_LIMIT = 100; // Zeilen in der Tabelle
+const LOAD_LIMIT = 1000; // für die Zählung offener HF-Details
+const AUTO_HR_REQUESTS = 40; // nach dem Import automatisch nachladen (Rest per Button)
 
 const SPORT_LABELS = {
   Run: "Lauf",
@@ -63,6 +66,7 @@ export function render(container) {
     <section class="card">
       <div class="button-row">
         <button id="act-import" class="button" type="button" disabled>Neue Aktivitäten importieren</button>
+        <button id="act-hr" class="button button-secondary" type="button" disabled>HF-Details nachladen</button>
       </div>
       <p id="act-message" class="message" role="status" hidden></p>
       <p id="act-hint" class="muted">Prüfe Login-Status …</p>
@@ -76,6 +80,7 @@ export function render(container) {
               <th>Datum</th><th>Sport</th><th>Name</th>
               <th class="num">Distanz</th><th class="num">Dauer</th>
               <th class="num">Höhe</th><th class="num">Ø HF</th>
+              <th title="Herzfrequenz sekundengenau ausgewertet">HF-Details</th>
             </tr>
           </thead>
           <tbody id="act-rows"></tbody>
@@ -85,6 +90,9 @@ export function render(container) {
     </section>`;
 
   const importButton = container.querySelector("#act-import");
+  const hrButton = container.querySelector("#act-hr");
+  let allActivities = [];
+  let busy = false;
   const message = container.querySelector("#act-message");
   const hint = container.querySelector("#act-hint");
   const title = container.querySelector("#act-title");
@@ -109,6 +117,7 @@ export function render(container) {
           [formatDuration(a.movingTime), "num"],
           [formatNumber(a.elevationGain, "m"), "num"],
           [formatNumber(a.averageHeartrate, "bpm"), "num"],
+          [!a.averageHeartrate ? "" : a.hrHistogram ? "✓" : a.hrChecked ? "keine" : "offen"],
         ];
         for (const [text, cls] of cells) {
           const td = document.createElement("td");
@@ -127,7 +136,9 @@ export function render(container) {
 
   async function loadList() {
     try {
-      renderRows(await listActivities({ max: LIST_LIMIT }));
+      allActivities = await listActivities({ max: LOAD_LIMIT });
+      renderRows(allActivities.slice(0, LIST_LIMIT));
+      updateState(currentUser());
     } catch (error) {
       showMessage(`Aktivitäten konnten nicht geladen werden: ${error.message}`, "error");
     }
@@ -135,14 +146,45 @@ export function render(container) {
 
   function updateState(user) {
     const connected = isConnected();
-    importButton.disabled = !user || !connected;
+    const pending = pendingHrActivities(allActivities).length;
+    importButton.disabled = busy || !user || !connected;
+    hrButton.disabled = busy || !user || !connected || pending === 0;
+    hrButton.textContent = pending ? `HF-Details nachladen (${pending} offen)` : "HF-Details vollständig";
     if (!user) hint.textContent = "Bitte zuerst anmelden.";
     else if (!connected) hint.textContent = "Bitte zuerst unter „Strava verbinden“ mit Strava verbinden.";
     else hint.textContent = "";
   }
 
+  /** Lädt HF-Details in einer Portion und meldet das Ergebnis. */
+  async function runHrBackfill(maxRequests, prefix = "") {
+    const result = await backfillHrDetails({
+      activities: allActivities,
+      maxRequests,
+      onProgress: (done, total) => showMessage(`${prefix}HF-Details: ${done} von ${total} geladen …`),
+    });
+    let text = `${prefix}HF-Details für ${result.done} Aktivitäten geladen.`;
+    if (result.rateLimited) text += ` Strava-Limit erreicht – noch ${result.remaining} offen, bitte in 15 Minuten fortsetzen.`;
+    else if (result.remaining) text += ` Noch ${result.remaining} offen – später erneut klicken (Strava erlaubt ca. 100 Anfragen pro 15 Minuten).`;
+    showMessage(text, result.rateLimited ? "error" : "ok");
+    renderRows(allActivities.slice(0, LIST_LIMIT));
+  }
+
+  hrButton.addEventListener("click", async () => {
+    busy = true;
+    updateState(currentUser());
+    try {
+      await runHrBackfill(DEFAULT_MAX_REQUESTS);
+    } catch (error) {
+      showMessage(error.message, "error");
+    } finally {
+      busy = false;
+      updateState(currentUser());
+    }
+  });
+
   importButton.addEventListener("click", async () => {
-    importButton.disabled = true;
+    busy = true;
+    updateState(currentUser());
     try {
       const newest = await newestActivityEpoch();
       const after = newest ?? Math.floor(Date.now() / 1000) - FIRST_IMPORT_DAYS * 24 * 3600;
@@ -156,13 +198,14 @@ export function render(container) {
         showMessage(`Speichere ${activities.length} Aktivitäten …`);
         await saveActivities(activities);
       }
-      showMessage(
-        activities.length ? `${activities.length} Aktivitäten importiert.` : "Keine neuen Aktivitäten gefunden.",
-      );
+      const imported = activities.length ? `${activities.length} Aktivitäten importiert. ` : "Keine neuen Aktivitäten. ";
+      showMessage(imported);
       await loadList();
+      if (pendingHrActivities(allActivities).length) await runHrBackfill(AUTO_HR_REQUESTS, imported);
     } catch (error) {
       showMessage(error.message, "error");
     } finally {
+      busy = false;
       updateState(currentUser());
     }
   });

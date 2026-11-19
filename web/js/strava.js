@@ -204,6 +204,7 @@ export async function disconnect() {
 
 // ---------- API ----------
 
+/** GET auf die Strava-API. Bei 404 wird null zurückgegeben (z. B. Aktivität ohne Streams). */
 async function stravaGet(path, params = {}) {
   const token = await getValidAccessToken();
   const url = new URL(STRAVA_API_BASE + path);
@@ -218,8 +219,11 @@ async function stravaGet(path, params = {}) {
   if (response.status === 429) {
     // Limits: 100 Anfragen / 15 Min., 1000 / Tag. Die Rate-Limit-Header gibt Strava per CORS
     // nicht frei, deshalb reagieren wir nur auf 429.
-    throw new Error("Strava-Anfragelimit erreicht. Bitte in 15 Minuten erneut versuchen.");
+    const error = new Error("Strava-Anfragelimit erreicht. Bitte in 15 Minuten erneut versuchen.");
+    error.rateLimited = true;
+    throw error;
   }
+  if (response.status === 404) return null;
   if (!response.ok) {
     throw new Error(`Strava-Anfrage fehlgeschlagen (${response.status}).`);
   }
@@ -245,6 +249,43 @@ export async function fetchActivitiesSince({ after, maxPages = 10, onPage } = {}
     if (batch.length < PER_PAGE) break;
   }
   return all;
+}
+
+// ---------- Herzfrequenz-Streams ----------
+
+export const HR_BIN_SIZE = 5; // bpm pro Histogramm-Bereich
+const MAX_GAP_SECONDS = 30; // längere Lücken (Pausen, Aufzeichnungsstopp) zählen nicht
+
+/**
+ * Berechnet aus Zeit- und HF-Stream ein Histogramm: { "140": Sekunden, "145": … }.
+ * Schlüssel = Untergrenze des 5er-Bereichs. Jede Zeitspanne zählt zur HF am Ende der Spanne.
+ * @returns {{ histogram: Object<string, number>, seconds: number } | null}
+ */
+export function buildHrHistogram(time, heartrate) {
+  if (!Array.isArray(time) || !Array.isArray(heartrate) || time.length !== heartrate.length) return null;
+  const histogram = {};
+  let seconds = 0;
+  for (let i = 1; i < time.length; i += 1) {
+    const dt = time[i] - time[i - 1];
+    const hr = heartrate[i];
+    if (!(dt > 0 && dt <= MAX_GAP_SECONDS) || !(hr > 0)) continue;
+    const bin = String(Math.floor(hr / HR_BIN_SIZE) * HR_BIN_SIZE);
+    histogram[bin] = (histogram[bin] ?? 0) + dt;
+    seconds += dt;
+  }
+  return seconds > 0 ? { histogram, seconds } : null;
+}
+
+/**
+ * Lädt den HF-Stream einer Aktivität und gibt das Histogramm zurück
+ * (null, wenn die Aktivität keine HF-Daten hat). Kostet eine API-Anfrage.
+ */
+export async function fetchHrHistogram(activityId) {
+  const streams = await stravaGet(`/activities/${activityId}/streams`, {
+    keys: "time,heartrate",
+    key_by_type: true,
+  });
+  return buildHrHistogram(streams?.time?.data, streams?.heartrate?.data);
 }
 
 /**

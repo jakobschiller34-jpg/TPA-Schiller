@@ -40,7 +40,9 @@ flowchart LR
 | `web/js/firebase.js` | Firebase-Initialisierung, Login/Logout |
 | `web/js/settings.js` | Schlüssel in localStorage lesen, speichern, löschen |
 | `web/js/secrets-sync.js` | Schlüssel zwischen localStorage und Firestore abgleichen |
-| `web/js/strava.js` | Gerüst: OAuth, Token-Refresh, Aktivitäten laden |
+| `web/js/strava.js` | Strava-OAuth, Token-Refresh, Aktivitäten laden |
+| `web/js/analysis.js` | Trainingsanalyse (reine Berechnungen) |
+| `web/js/hr-details.js` | HF-Streams nachladen, Histogramme speichern |
 | `web/js/gemini.js` | Gerüst: Gemini Interactions API, Modell- und Prompt-Konstanten |
 | `web/js/views/*.js` | je ein Modul pro Seite |
 | `firestore.rules` | Security Rules zum Einfügen in der Firebase-Konsole |
@@ -53,7 +55,7 @@ flowchart LR
 ### Firestore-Datenmodell (geplant)
 
 ```
-users/{uid}
+users/{uid}                           Profil & Ziele (Max-HF, Ruhepuls, Wettkampf)
 users/{uid}/activities/{activityId}   normalisierte Strava-Aktivitäten
 users/{uid}/analyses/{analysisId}     Auswertungen und KI-Empfehlungen
 users/{uid}/plans/{planId}            Trainingspläne
@@ -170,7 +172,13 @@ den Hinweis „Firebase ist noch nicht konfiguriert“.
    Aktivitäten; seitenweise (200 pro Seite), ohne GPS-Daten, gespeichert in
    `users/{uid}/activities/{stravaId}`. Bei Strava-Limit (429) Hinweis statt Abbruchschleife.
 4. Offen: ältere Aktivitäten nachladen, Aktivitäten bei Änderungen in Strava aktualisieren.
-5. Analyse: Wochenumfang, Intensitätsverteilung, Trends, Belastung.
+5. ~~Analyse~~ – **umgesetzt** (`web/js/analysis.js`, Fokus Laufen + Rad): Wochenumfang
+   (12 Wochen), HF-Zonen aus Max-HF bzw. HF-Reserve, Belastung akut/chronisch
+   (Minuten × Zone), Trend 4 vs. 4 Wochen, Wettkampf-Countdown. Profil & Ziele in `users/{uid}`.
+   **HF-Streams umgesetzt** (`web/js/hr-details.js`): pro Aktivität wird der Strava-Stream
+   geladen und nur ein HF-Histogramm (Sekunden pro 5-bpm-Bereich) gespeichert. Zonen und
+   Belastung werden daraus zeitanteilig berechnet, sonst über die Ø-HF. Nachladen in Portionen
+   (80 Anfragen) wegen des Strava-Limits (~100 / 15 Min.).
 6. Gemini-Anbindung aktivieren (`callGemini()`), JSON-Antworten gegen ein Schema prüfen.
 7. Trainingsplan als JSON erzeugen, speichern und anzeigen.
 8. Login-Guard im Router: nicht angemeldete Nutzer auf `#login` umleiten.
