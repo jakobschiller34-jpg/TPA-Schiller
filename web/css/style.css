@@ -224,3 +224,47 @@ a {
     padding: 1.5rem var(--gap);
   }
 }
+
+/* ---------- Tabellen ---------- */
+
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.table th,
+.table td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table td:nth-child(3) {
+  white-space: normal;
+  min-width: 10rem;
+}
+
+.table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.table tbody tr:hover {
+  background: var(--bg);
+}
+
+code {
+  word-break: break-all;
+}

@@ -73,7 +73,7 @@ async function handleStravaRedirect() {
   try {
     await handleCallback(params);
   } catch (error) {
-    // Im Gerüst erwartbar (TODO in strava.js); wird nur protokolliert.
+    // Die Meldung zeigt die Seite #verbinden an (strava.takeFlash()).
     console.warn("Strava-Callback:", error.message);
   }
 }

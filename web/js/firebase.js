@@ -12,12 +12,18 @@ import {
   signOut,
 } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-auth.js";
 import {
+  collection,
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   getFirestore,
+  limit,
+  orderBy,
+  query,
   serverTimestamp,
   setDoc,
+  writeBatch,
 } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-firestore.js";
 
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
@@ -142,8 +148,41 @@ export async function deleteSecretsFromFirestore() {
   await deleteDoc(secretsRef(user.uid));
 }
 
-// TODO: Firestore-Hilfsfunktionen für das übrige Datenmodell (siehe README / firestore.rules):
-//   users/{uid}/activities/{activityId}
+// ---------- Aktivitäten: users/{uid}/activities/{stravaActivityId} ----------
+
+function activitiesRef(uid) {
+  return collection(db, "users", uid, "activities");
+}
+
+/**
+ * Speichert normalisierte Aktivitäten (Dokument-ID = Strava-ID, vorhandene werden überschrieben).
+ * Firestore erlaubt max. 500 Schreibvorgänge pro Batch.
+ */
+export async function saveActivities(activities) {
+  const user = requireUser();
+  const col = activitiesRef(user.uid);
+  for (let i = 0; i < activities.length; i += 400) {
+    const batch = writeBatch(db);
+    for (const activity of activities.slice(i, i + 400)) {
+      batch.set(doc(col, String(activity.id)), { ...activity, importedAt: serverTimestamp() });
+    }
+    await batch.commit();
+  }
+}
+
+/** Neueste gespeicherte Aktivitäten zuerst. */
+export async function listActivities({ max = 100 } = {}) {
+  const user = requireUser();
+  const snapshot = await getDocs(query(activitiesRef(user.uid), orderBy("startEpoch", "desc"), limit(max)));
+  return snapshot.docs.map((d) => d.data());
+}
+
+/** Startzeit (Unix-Sekunden) der neuesten gespeicherten Aktivität oder null. */
+export async function newestActivityEpoch() {
+  const [newest] = await listActivities({ max: 1 });
+  return newest?.startEpoch ?? null;
+}
+
+// TODO: Firestore-Hilfsfunktionen für analyses und plans:
 //   users/{uid}/analyses/{analysisId}
 //   users/{uid}/plans/{planId}
-// z. B. saveActivities(uid, activities), listActivities(uid), savePlan(uid, plan), …

@@ -164,9 +164,12 @@ den Hinweis „Firebase ist noch nicht konfiguriert“.
 1. ~~CORS-Test Strava-Token-Tausch~~ – **erledigt (2026-11-19):** `POST /oauth/token` und
    `/api/v3/...` antworten mit `access-control-allow-origin: *`. Token-Tausch, Refresh und
    Aktivitäten-Abruf funktionieren direkt aus dem Browser, ein Backend ist nicht nötig.
-2. Strava-OAuth fertigstellen: `buildAuthorizeUrl()`, `handleCallback()` mit `state`-Prüfung.
-3. Token-Refresh (`refreshTokenIfNeeded()`).
-4. Aktivitäten-Import mit Paginierung, Rate-Limit-Beachtung und Speicherung in Firestore.
+2. ~~Strava-OAuth~~ – **umgesetzt:** Verbinden/Trennen, `state`- und Scope-Prüfung, Token-Refresh
+   (`getValidAccessToken()`). Tokens nur im localStorage – pro Gerät/Domain einmal verbinden.
+3. ~~Aktivitäten-Import~~ – **umgesetzt:** Erstimport der letzten 12 Monate, danach nur neue
+   Aktivitäten; seitenweise (200 pro Seite), ohne GPS-Daten, gespeichert in
+   `users/{uid}/activities/{stravaId}`. Bei Strava-Limit (429) Hinweis statt Abbruchschleife.
+4. Offen: ältere Aktivitäten nachladen, Aktivitäten bei Änderungen in Strava aktualisieren.
 5. Analyse: Wochenumfang, Intensitätsverteilung, Trends, Belastung.
 6. Gemini-Anbindung aktivieren (`callGemini()`), JSON-Antworten gegen ein Schema prüfen.
 7. Trainingsplan als JSON erzeugen, speichern und anzeigen.
