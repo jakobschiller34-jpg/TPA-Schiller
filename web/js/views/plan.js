@@ -4,7 +4,7 @@ export function render(container) {
     <section class="card">
       <p class="muted">Hier erscheint später dein mehrwöchiger Trainingsplan.</p>
       <p class="todo">
-        TODO: Plan mit Claude als JSON erzeugen, gegen ein Schema prüfen, unter
+        TODO: Plan mit Gemini als JSON erzeugen, gegen ein Schema prüfen, unter
         <code>users/{uid}/plans</code> speichern und hier wochenweise anzeigen.
       </p>
     </section>`;

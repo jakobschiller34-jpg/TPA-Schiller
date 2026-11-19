@@ -1,7 +1,7 @@
 # TPA – persönlicher Trainingsplaner
 
 Eine Web-App nur für mich: Sie verbindet sich mit Strava, analysiert meine Aktivitäten und lässt
-mit der Claude API Trainingsempfehlungen und einen Trainingsplan erstellen.
+mit der Gemini API (Google, kostenloser Tarif) Trainingsempfehlungen und einen Trainingsplan erstellen.
 
 > **Stand:** Grundgerüst. Navigation, Login (E-Mail/Passwort) und die Einstellungsseite funktionieren,
 > alles andere sind Platzhalter mit `TODO`-Kommentaren.
@@ -12,12 +12,12 @@ mit der Claude API Trainingsempfehlungen und einen Trainingsplan erstellen.
 flowchart LR
   subgraph Browser["Browser (GitHub Pages, /web)"]
     UI["HTML/CSS/JS<br/>ES-Module"]
-    LS[("localStorage<br/>Strava-Secret, Tokens,<br/>Anthropic-Key")]
+    LS[("localStorage<br/>Schlüssel, Strava-Tokens")]
   end
   UI -- "E-Mail/Passwort" --> Auth["Firebase Auth"]
   UI -- "users/{uid}/…" --> FS[("Cloud Firestore")]
   UI -- "OAuth + REST" --> Strava["Strava API"]
-  UI -- "Messages API" --> Claude["Claude API"]
+  UI -- "Interactions API" --> Gemini["Gemini API"]
   UI <--> LS
 ```
 
@@ -26,7 +26,7 @@ flowchart LR
 - **Firebase (Spark-Tarif, kostenlos):** Authentication (E-Mail/Passwort) und Cloud Firestore.
   Das SDK wird per CDN von `gstatic.com` mit fester Version (`13.2.0`) geladen.
 - **Kein eigenes Backend:** Cloud Functions bräuchten den kostenpflichtigen Blaze-Tarif. Da die App
-  nur von mir genutzt wird, werden Strava und Claude direkt aus dem Browser angesprochen.
+  nur von mir genutzt wird, werden Strava und Gemini direkt aus dem Browser angesprochen.
   Der Preis dafür: Geheimnisse müssen im Browser liegen (siehe Sicherheitshinweise).
 
 ### Dateien
@@ -39,8 +39,9 @@ flowchart LR
 | `web/js/firebase-config.js` | öffentliche Firebase-Konfiguration |
 | `web/js/firebase.js` | Firebase-Initialisierung, Login/Logout |
 | `web/js/settings.js` | Schlüssel in localStorage lesen, speichern, löschen |
+| `web/js/secrets-sync.js` | Schlüssel zwischen localStorage und Firestore abgleichen |
 | `web/js/strava.js` | Gerüst: OAuth, Token-Refresh, Aktivitäten laden |
-| `web/js/claude.js` | Gerüst: Claude Messages API, Modell- und Prompt-Konstanten |
+| `web/js/gemini.js` | Gerüst: Gemini Interactions API, Modell- und Prompt-Konstanten |
 | `web/js/views/*.js` | je ein Modul pro Seite |
 | `firestore.rules` | Security Rules zum Einfügen in der Firebase-Konsole |
 | `.github/workflows/deploy-pages.yml` | Deployment von `/web` auf GitHub Pages |
@@ -54,27 +55,39 @@ flowchart LR
 ```
 users/{uid}
 users/{uid}/activities/{activityId}   normalisierte Strava-Aktivitäten
-users/{uid}/analyses/{analysisId}     Auswertungen und Claude-Empfehlungen
+users/{uid}/analyses/{analysisId}     Auswertungen und KI-Empfehlungen
 users/{uid}/plans/{planId}            Trainingspläne
+users/{uid}/private/secrets           Strava Client ID/Secret, Gemini API-Key
 ```
 
 Jeder Nutzer darf nur unter `users/{uid}/…` lesen und schreiben, alles andere ist gesperrt.
 
 ## Sicherheitshinweise
 
-- **Niemals ins Repository:** Strava Client Secret, Strava Access-/Refresh-Tokens, Anthropic-API-Key.
-- Diese Werte werden auf der Seite **Einstellungen** eingegeben und **nur im localStorage dieses
-  Browsers** gespeichert – nicht im Code und nicht in Firestore.
-- Der Button **„Alle Schlüssel löschen“** entfernt sie wieder (z. B. vor dem Abmelden auf einem
-  fremden Gerät). Die App am besten nur auf eigenen Geräten verwenden.
+- **Niemals ins Repository:** Strava Client Secret, Strava Access-/Refresh-Tokens, Gemini-API-Key.
+- Diese Werte werden auf der Seite **Einstellungen** eingegeben und im localStorage des Browsers
+  gespeichert. Mit **„In Firebase speichern“** landen Strava Client ID, Strava Client Secret und
+  Gemini API-Key zusätzlich in `users/{uid}/private/secrets`. Nach dem Login auf einem anderen
+  Gerät holt die App fehlende Schlüssel automatisch von dort.
+- Das Firestore-Dokument liegt **im Klartext** vor und ist nur durch Firebase-Login und
+  `firestore.rules` geschützt (nur der Eigentümer darf lesen). Wer dein Login-Passwort kennt,
+  kann die Schlüssel lesen → **starkes, eigenes Passwort** verwenden und die Selbstregistrierung
+  in Firebase abschalten.
+- Strava Access-/Refresh-Tokens bleiben nur im localStorage.
+- Der Button **„Alle Schlüssel löschen“** entfernt die Schlüssel aus dem Browser und – wenn du
+  angemeldet bist – auch aus Firebase. Die App am besten nur auf eigenen Geräten verwenden.
 - localStorage ist für jedes Skript auf der Seite lesbar. Deshalb: keine fremden Skripte einbinden
   (außer dem Firebase-SDK mit fester Version), Nutzereingaben und API-Antworten nie als HTML
   einsetzen (`textContent` statt `innerHTML`).
 - Das Strava Client Secret im Browser ist ein bewusster Kompromiss, weil es keinen Server gibt.
   Bei Verdacht auf Missbrauch das Secret in den Strava-API-Einstellungen neu erzeugen.
-- Claude-Aufrufe aus dem Browser benötigen den Header
-  `anthropic-dangerous-direct-browser-access: true`. **Unbedingt ein Ausgabelimit** für den
-  API-Key in der Anthropic-Konsole setzen.
+- Der Gemini-API-Key wird aus dem Browser verwendet. In der Google Cloud Console den Key
+  **einschränken**: Anwendungseinschränkung „Websites“ (nur
+  `https://jakobschiller34-jpg.github.io/*` und `http://localhost:*/*`) und
+  API-Einschränkung nur „Generative Language API“.
+- **Kostenloser Gemini-Tarif:** Google darf Eingaben und Antworten zur Produktverbesserung nutzen.
+  Deshalb nur kompakte, anonymisierte Trainingszusammenfassungen senden (keine Namen, Orte,
+  GPS-Spuren). Für das Projekt des Keys **keine Abrechnung aktivieren**, sonst wird es kostenpflichtig.
 - Die Firebase-Web-Konfiguration (`apiKey`, `projectId` …) ist öffentlich und darf ins Repository.
   Geschützt werden die Daten durch Login und `firestore.rules`.
 
@@ -110,16 +123,23 @@ Firestore Database → **Regeln** → den Inhalt von [`firestore.rules`](firesto
 
 1. Unter <https://www.strava.com/settings/api> eine App anlegen.
 2. **Authorization Callback Domain:** `jakobschiller34-jpg.github.io` (nur die Domain, ohne
-   `https://` und ohne Pfad). Für lokale Tests akzeptiert Strava auch `localhost`; die Domain
-   muss dann vorübergehend umgestellt werden.
+   `https://` und ohne Pfad). `localhost` und `127.0.0.1` sind bei Strava
+   immer erlaubt, lokale Tests funktionieren also ohne Umstellen. Als **Website** reicht
+   `https://jakobschiller34-jpg.github.io/TPA-Schiller/` (nur Info-Feld).
 3. **Client ID** und **Client Secret** notieren und später in der App unter
    **Einstellungen** eintragen – nicht im Code.
 
-### 4. Anthropic-API-Key erstellen
+### 4. Gemini-API-Key erstellen (kostenlos)
 
-1. In der [Claude Console](https://console.anthropic.com/) einen API-Key erstellen.
-2. Unter Limits ein **monatliches Ausgabelimit** setzen (z. B. wenige Euro).
-3. Den Key in der App unter **Einstellungen** eintragen.
+1. In [Google AI Studio](https://aistudio.google.com/) mit einem Google-Konto anmelden und
+   unter **Get API key** einen Key erstellen. Ein bestehendes Google-Cloud-Projekt
+   (z. B. das Firebase-Projekt) oder ein neues kann gewählt werden. Abrechnung **nicht** aktivieren.
+2. In der [Google Cloud Console](https://console.cloud.google.com/apis/credentials) den Key
+   einschränken (siehe Sicherheitshinweise: Websites + nur „Generative Language API“).
+3. Den Key in der App unter **Einstellungen** eintragen und „In Firebase speichern“ klicken.
+
+Modell: `gemini-3.8-flash` (Konstante `GEMINI_MODEL` in `web/js/gemini.js`). Der kostenlose
+Tarif hat Anfrage-Kontingente pro Minute und Tag – für eine Person reicht das.
 
 ### 5. GitHub Pages aktivieren
 
@@ -141,13 +161,13 @@ den Hinweis „Firebase ist noch nicht konfiguriert“.
 
 ## Offene Punkte und nächste Ausbaustufen
 
-1. **CORS-Test Strava-Token-Tausch:** Prüfen, ob `POST https://www.strava.com/oauth/token`
-   direkt aus dem Browser funktioniert. Falls nicht, braucht es doch einen kleinen Proxy
-   (z. B. Cloudflare Worker) oder Cloud Functions (Blaze-Tarif).
+1. ~~CORS-Test Strava-Token-Tausch~~ – **erledigt (2026-11-19):** `POST /oauth/token` und
+   `/api/v3/...` antworten mit `access-control-allow-origin: *`. Token-Tausch, Refresh und
+   Aktivitäten-Abruf funktionieren direkt aus dem Browser, ein Backend ist nicht nötig.
 2. Strava-OAuth fertigstellen: `buildAuthorizeUrl()`, `handleCallback()` mit `state`-Prüfung.
 3. Token-Refresh (`refreshTokenIfNeeded()`).
 4. Aktivitäten-Import mit Paginierung, Rate-Limit-Beachtung und Speicherung in Firestore.
 5. Analyse: Wochenumfang, Intensitätsverteilung, Trends, Belastung.
-6. Claude-Anbindung aktivieren (`callClaude()`), Antworten gegen ein Schema prüfen.
+6. Gemini-Anbindung aktivieren (`callGemini()`), JSON-Antworten gegen ein Schema prüfen.
 7. Trainingsplan als JSON erzeugen, speichern und anzeigen.
 8. Login-Guard im Router: nicht angemeldete Nutzer auf `#login` umleiten.

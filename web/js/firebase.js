@@ -11,7 +11,14 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-auth.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-firestore.js";
+import {
+  deleteDoc,
+  doc,
+  getDoc,
+  getFirestore,
+  serverTimestamp,
+  setDoc,
+} from "https://www.gstatic.com/firebasejs/13.2.0/firebase-firestore.js";
 
 import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 
@@ -85,9 +92,58 @@ export function currentUser() {
   return auth?.currentUser ?? null;
 }
 
-// TODO: Firestore-Hilfsfunktionen für das Datenmodell (siehe README / firestore.rules):
+// ---------- Schlüssel in Firestore: users/{uid}/private/secrets ----------
+//
+// Die Schlüssel liegen im Klartext in einem Dokument, das laut firestore.rules nur der
+// angemeldete Eigentümer lesen und schreiben darf. Schutz = Firebase-Login + Security Rules.
+// Wer das Login-Passwort kennt, kann die Schlüssel lesen → starkes Passwort verwenden.
+
+function requireUser() {
+  const user = requireAuth().currentUser;
+  if (!user) throw new Error("Bitte zuerst anmelden.");
+  return user;
+}
+
+function secretsRef(uid) {
+  return doc(db, "users", uid, "private", "secrets");
+}
+
+/**
+ * Speichert die Schlüssel in Firestore.
+ * Neue nicht-leere Werte überschreiben vorhandene; fehlende Werte bleiben aus Firestore erhalten.
+ * Das Dokument wird komplett neu geschrieben (ohne merge) und enthält nur `allowedKeys` –
+ * so verschwinden veraltete Felder (z. B. ein früherer anthropicApiKey), die die Rules ablehnen würden.
+ */
+export async function saveSecretsToFirestore(values, allowedKeys) {
+  const user = requireUser();
+  const ref = secretsRef(user.uid);
+  const snapshot = await getDoc(ref);
+  const existing = snapshot.exists() ? snapshot.data() : {};
+  const data = {};
+  for (const key of allowedKeys) {
+    const value = values[key] || existing[key];
+    if (typeof value === "string" && value) data[key] = value;
+  }
+  await setDoc(ref, { ...data, updatedAt: serverTimestamp() });
+}
+
+/** Lädt die Schlüssel aus Firestore. Gibt {} zurück, wenn noch nichts gespeichert ist. */
+export async function loadSecretsFromFirestore() {
+  const user = requireUser();
+  const snapshot = await getDoc(secretsRef(user.uid));
+  if (!snapshot.exists()) return {};
+  const { updatedAt, ...secrets } = snapshot.data();
+  void updatedAt;
+  return secrets;
+}
+
+export async function deleteSecretsFromFirestore() {
+  const user = requireUser();
+  await deleteDoc(secretsRef(user.uid));
+}
+
+// TODO: Firestore-Hilfsfunktionen für das übrige Datenmodell (siehe README / firestore.rules):
 //   users/{uid}/activities/{activityId}
 //   users/{uid}/analyses/{analysisId}
 //   users/{uid}/plans/{planId}
 // z. B. saveActivities(uid, activities), listActivities(uid), savePlan(uid, plan), …
-// WICHTIG: Niemals Strava-Tokens oder API-Keys in Firestore speichern.

@@ -1,6 +1,7 @@
 // Einstiegspunkt: Hash-Router, Login-Status im Kopfbereich, Strava-Callback-Erkennung.
 
 import { logout, onUserChanged } from "./firebase.js";
+import { pullMissingSecrets } from "./secrets-sync.js";
 import { handleCallback } from "./strava.js";
 
 import * as login from "./views/login.js";
@@ -80,6 +81,15 @@ async function handleStravaRedirect() {
 onUserChanged((user) => {
   userName.textContent = user ? (user.displayName ?? user.email ?? "Angemeldet") : "Nicht angemeldet";
   logoutButton.hidden = !user;
+
+  // Nach dem Login fehlende Schlüssel aus Firestore in den localStorage holen.
+  if (user) {
+    pullMissingSecrets()
+      .then((count) => {
+        if (count > 0 && currentRoute() === "einstellungen") render();
+      })
+      .catch((error) => console.warn("Schlüssel aus Firebase laden:", error.message));
+  }
 });
 
 logoutButton.addEventListener("click", async () => {

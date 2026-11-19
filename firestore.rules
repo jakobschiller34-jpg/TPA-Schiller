@@ -3,26 +3,52 @@ rules_version = '2';
 // Firestore Security Rules
 //
 // Grundsatz: Jeder angemeldete Nutzer darf ausschließlich seine eigenen Daten unter
-// users/{uid}/... lesen und schreiben. Alles andere ist gesperrt (Firestore verbietet
-// standardmäßig alles, was nicht explizit erlaubt ist).
+// users/{uid}/... lesen und schreiben. Alles, was hier nicht ausdrücklich erlaubt ist,
+// ist gesperrt – auch neue Sammlungen. Kommt später eine Sammlung dazu, hier ergänzen.
 //
-// Geplantes Datenmodell:
+// Datenmodell:
 //   users/{uid}                              – Profil / Einstellungen ohne Geheimnisse
 //   users/{uid}/activities/{activityId}      – normalisierte Strava-Aktivitäten
-//   users/{uid}/analyses/{analysisId}        – Auswertungen und Claude-Empfehlungen
+//   users/{uid}/analyses/{analysisId}        – Auswertungen und KI-Empfehlungen (Gemini)
 //   users/{uid}/plans/{planId}               – Trainingspläne
+//   users/{uid}/private/secrets              – Strava Client ID/Secret, Gemini API-Key
+//                                              (Klartext, nur für den Eigentümer lesbar)
 //
-// Strava-Tokens und API-Keys werden NIE in Firestore gespeichert (nur localStorage).
+// Strava Access-/Refresh-Tokens bleiben nur im localStorage des Browsers.
 //
 // Einfügen in der Firebase-Konsole: Firestore Database → Regeln → Inhalt ersetzen → Veröffentlichen.
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
 
-      match /{document=**} {
-        allow read, write: if request.auth != null && request.auth.uid == uid;
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      match /activities/{activityId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /analyses/{analysisId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /plans/{planId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Schlüssel-Dokument: nur der Eigentümer, nur bekannte Felder, nur Text.
+      match /private/secrets {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.keys().hasOnly(
+               ['stravaClientId', 'stravaClientSecret', 'geminiApiKey', 'updatedAt'])
+          && (!('stravaClientId' in request.resource.data) || request.resource.data.stravaClientId is string)
+          && (!('stravaClientSecret' in request.resource.data) || request.resource.data.stravaClientSecret is string)
+          && (!('geminiApiKey' in request.resource.data) || request.resource.data.geminiApiKey is string);
       }
     }
   }

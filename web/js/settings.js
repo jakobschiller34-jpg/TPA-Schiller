@@ -1,7 +1,9 @@
 // Schlüssel und Tokens zur Laufzeit in localStorage verwalten.
 //
-// Diese Werte dürfen NIEMALS im Code, im Repository oder in Firestore landen.
-// Sie liegen ausschließlich im localStorage dieses Browsers auf diesem Gerät.
+// Diese Werte dürfen NIEMALS im Code oder im Repository landen.
+// Arbeitskopie: localStorage dieses Browsers. Die mit `sync: true` markierten Schlüssel
+// können zusätzlich in Firestore (users/{uid}/private/secrets) abgelegt werden,
+// damit sie auf jedem Gerät nach dem Login verfügbar sind (siehe secrets-sync.js).
 // Hinweis: Jedes Skript, das auf dieser Seite läuft, kann localStorage lesen.
 // Deshalb keine fremden Skripte einbinden und Nutzereingaben nie als HTML rendern.
 
@@ -9,14 +11,17 @@ const PREFIX = "tpa.";
 
 /** Alle Schlüssel, die die App kennt, mit Beschriftung für die Einstellungsseite. */
 export const SETTING_KEYS = {
-  stravaClientId: { label: "Strava Client ID", secret: false, editable: true },
-  stravaClientSecret: { label: "Strava Client Secret", secret: true, editable: true },
-  anthropicApiKey: { label: "Anthropic API-Key", secret: true, editable: true },
+  stravaClientId: { label: "Strava Client ID", secret: false, editable: true, sync: true },
+  stravaClientSecret: { label: "Strava Client Secret", secret: true, editable: true, sync: true },
+  geminiApiKey: { label: "Gemini API-Key", secret: true, editable: true, sync: true },
   // Werden später automatisch durch den Strava-OAuth-Ablauf gesetzt:
   stravaAccessToken: { label: "Strava Access Token", secret: true, editable: false },
   stravaRefreshToken: { label: "Strava Refresh Token", secret: true, editable: false },
   stravaExpiresAt: { label: "Strava Token läuft ab (Unix-Zeit)", secret: false, editable: false },
 };
+
+/** Nicht mehr genutzte Schlüssel, die beim Löschen trotzdem mit entfernt werden. */
+const LEGACY_KEYS = ["anthropicApiKey"];
 
 function assertKnown(key) {
   if (!(key in SETTING_KEYS)) throw new Error(`Unbekannter Einstellungsschlüssel: ${key}`);
@@ -53,10 +58,13 @@ export function getAllSettings() {
   return Object.fromEntries(Object.keys(SETTING_KEYS).map((key) => [key, getSetting(key)]));
 }
 
+/** Schlüssel, die mit Firestore abgeglichen werden. */
+export const SYNC_KEYS = Object.keys(SETTING_KEYS).filter((key) => SETTING_KEYS[key].sync);
+
 /** Entfernt alle Schlüssel und Tokens dieser App aus localStorage. */
 export function clearAllSettings() {
   try {
-    for (const key of Object.keys(SETTING_KEYS)) localStorage.removeItem(PREFIX + key);
+    for (const key of [...Object.keys(SETTING_KEYS), ...LEGACY_KEYS]) localStorage.removeItem(PREFIX + key);
     return true;
   } catch {
     return false;
