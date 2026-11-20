@@ -58,11 +58,12 @@ flowchart LR
 ### Firestore-Datenmodell (geplant)
 
 ```
-users/{uid}                           Profil & Ziele (Max-HF, Ruhepuls, Wettkampf)
+users/{uid}                           Profil & Ziele, Strava-Name + Profilbild-Link
 users/{uid}/activities/{activityId}   normalisierte Strava-Aktivitäten
 users/{uid}/analyses/{analysisId}     Auswertungen und KI-Empfehlungen
 users/{uid}/plans/{planId}            Saisonpläne (Wochenziele bis zum Wettkampf)
-users/{uid}/private/secrets           Strava Client ID/Secret, Gemini API-Key
+users/{uid}/reviews/{reviewId}        Wochenrückblicke
+users/{uid}/private/secrets           Strava Client ID/Secret, Gemini API-Key, Strava-Tokens
 ```
 
 Jeder Nutzer darf nur unter `users/{uid}/…` lesen und schreiben, alles andere ist gesperrt.
@@ -78,7 +79,10 @@ Jeder Nutzer darf nur unter `users/{uid}/…` lesen und schreiben, alles andere 
   `firestore.rules` geschützt (nur der Eigentümer darf lesen). Wer dein Login-Passwort kennt,
   kann die Schlüssel lesen → **starkes, eigenes Passwort** verwenden und die Selbstregistrierung
   in Firebase abschalten.
-- Strava Access-/Refresh-Tokens bleiben nur im localStorage.
+- Strava Access-/Refresh-Tokens werden ebenfalls in `users/{uid}/private/secrets` abgeglichen
+  (die neuere Fassung gewinnt), damit die Strava-Verbindung auf allen Geräten erhalten bleibt.
+  „Verbindung trennen“ entfernt sie auch dort. Wer dein App-Passwort kennt, könnte damit deine
+  Strava-Aktivitäten lesen (nur lesen).
 - Der Button **„Alle Schlüssel löschen“** entfernt die Schlüssel aus dem Browser und – wenn du
   angemeldet bist – auch aus Firebase. Die App am besten nur auf eigenen Geräten verwenden.
 - localStorage ist für jedes Skript auf der Seite lesbar. Deshalb: keine fremden Skripte einbinden
@@ -204,5 +208,12 @@ den Hinweis „Firebase ist noch nicht konfiguriert“.
     (Saisonplan → Wochenziele → Tagesplan; „Saisonplan erstellen“ legt den Tagesplan automatisch an).
     Die Analyse-Seite zeigt nur Zahlen und die Gemini-Einschätzung. „Deep Blue“-Design mit Dark Mode,
     Schriften Inter/Space Grotesk über Google Fonts.
+12. ~~Kraft, Dehnen, Detailanleitungen, Wochenrückblick~~ – **umgesetzt:** Sportarten „Krafttraining“
+    und „Dehnen/Mobilität“, fester Kraft-/Dehnblock (`supplement`) pro Tag, Ausstattung im Profil.
+    Jede Einheit hat eine Schritt-für-Schritt-Anleitung (`steps`), aufklappbar im Trainingsplan.
+    Wochenrückblick der letzten 7 Tage auf der Analyse-Seite (ohne Plan), gespeichert in
+    `users/{uid}/reviews`. Der Saisonplan enthält pro Woche Ziele für Kraft- und Dehneinheiten
+    (`strengthSessions`, `mobilitySessions`). Gezählt werden Tage mit erledigter Einheit (abgehakt
+    oder passende Strava-Aktivität), und sie fließen in die Wochenerfüllung ein.
 10. ~~Login-Sperre~~ – **umgesetzt:** ohne Anmeldung leitet jede Seite auf `#login` um; nach dem
     Login geht es zur ursprünglich gewünschten Seite zurück. Ohne Firebase-Konfiguration frei.

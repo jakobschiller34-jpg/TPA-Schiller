@@ -356,6 +356,7 @@ export function summaryForAi(activities, profile, { now = new Date(), seasonCont
           }
         : null,
       ride: profile.rideGoal || null,
+      strengthEquipment: profile.strengthEquipment || null, // z. B. „Kurzhanteln, Theraband“
     },
     load: { acute7d: round(a.load.acute), chronicWeeklyAvg: round(a.load.chronic), ratio: round(a.load.ratio, 2), status: a.load.status },
     intensity4w: {

@@ -47,16 +47,34 @@ function randomState() {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Haken für den geräteübergreifenden Abgleich der Tokens (von app.js gesetzt, siehe secrets-sync.js).
+// strava.js kennt Firebase bewusst nicht.
+const tokenHooks = { onStored: null, beforeRefresh: null, onCleared: null };
+
+/** @param {{ onStored?: () => void, beforeRefresh?: () => Promise<void>, onCleared?: () => void }} hooks */
+export function setTokenSyncHooks(hooks) {
+  Object.assign(tokenHooks, hooks);
+}
+
 function storeTokens({ access_token, refresh_token, expires_at }) {
   setSetting("stravaAccessToken", access_token);
   setSetting("stravaRefreshToken", refresh_token);
   setSetting("stravaExpiresAt", String(expires_at));
+  tokenHooks.onStored?.();
 }
 
 function clearTokens() {
   setSetting("stravaAccessToken", null);
   setSetting("stravaRefreshToken", null);
   setSetting("stravaExpiresAt", null);
+  tokenHooks.onCleared?.();
+}
+
+function validStoredToken() {
+  const accessToken = getSetting("stravaAccessToken");
+  const expiresAt = Number(getSetting("stravaExpiresAt")) || 0;
+  const now = Math.floor(Date.now() / 1000);
+  return accessToken && expiresAt - now > REFRESH_MARGIN_SECONDS ? accessToken : null;
 }
 
 async function postToken(params) {
@@ -162,6 +180,7 @@ export async function handleCallback(params) {
       grant_type: "authorization_code",
     });
     storeTokens(data);
+    cacheAthlete(toAthlete(data.athlete)); // Profilbild/Name gleich mitnehmen
 
     const name = data.athlete?.firstname ? ` als ${data.athlete.firstname}` : "";
     setFlash(`Mit Strava verbunden${name}.`, "ok");
@@ -173,20 +192,28 @@ export async function handleCallback(params) {
 
 /** Gibt einen gültigen Access Token zurück und erneuert ihn bei Bedarf. */
 export async function getValidAccessToken() {
-  const refreshToken = getSetting("stravaRefreshToken");
-  if (!refreshToken) throw new Error("Nicht mit Strava verbunden. Bitte zuerst unter „Strava verbinden“ verbinden.");
+  if (!getSetting("stravaRefreshToken")) {
+    throw new Error("Nicht mit Strava verbunden. Bitte zuerst unter „Strava verbinden“ verbinden.");
+  }
+  const valid = validStoredToken();
+  if (valid) return valid;
 
-  const accessToken = getSetting("stravaAccessToken");
-  const expiresAt = Number(getSetting("stravaExpiresAt")) || 0;
-  const now = Math.floor(Date.now() / 1000);
-  if (accessToken && expiresAt - now > REFRESH_MARGIN_SECONDS) return accessToken;
+  // Vor dem Erneuern den neuesten Stand holen: Ein anderes Gerät hat evtl. schon erneuert
+  // (und Strava dabei einen neuen Refresh Token ausgegeben).
+  try {
+    await tokenHooks.beforeRefresh?.();
+  } catch (error) {
+    console.warn("Strava-Tokens abgleichen:", error.message);
+  }
+  const synced = validStoredToken();
+  if (synced) return synced;
 
   const { clientId, clientSecret } = requireClientCredentials();
   const data = await postToken({
     client_id: clientId,
     client_secret: clientSecret,
     grant_type: "refresh_token",
-    refresh_token: refreshToken,
+    refresh_token: getSetting("stravaRefreshToken"),
   });
   storeTokens(data); // Strava kann dabei auch einen neuen Refresh Token liefern
   return data.access_token;
@@ -199,6 +226,7 @@ export async function disconnect() {
     await fetch(STRAVA_DEAUTHORIZE_URL, { method: "POST", body: new URLSearchParams({ access_token: token }) });
   } finally {
     clearTokens();
+    cacheAthlete(null);
   }
 }
 
@@ -228,6 +256,50 @@ async function stravaGet(path, params = {}) {
     throw new Error(`Strava-Anfrage fehlgeschlagen (${response.status}).`);
   }
   return response.json();
+}
+
+// ---------- Athletenprofil (Name + Profilbild) ----------
+
+const ATHLETE_KEY = "tpa.stravaAthlete"; // localStorage-Cache, keine Geheimnisse
+
+/**
+ * Reduziert das Strava-Athletenobjekt auf Name und Bild-Link.
+ * Ohne eigenes Bild liefert Strava einen relativen Platzhalter (z. B. "avatar/athlete/large.png")
+ * – dann avatarUrl = null, die App zeigt Initialen.
+ */
+export function toAthlete(raw) {
+  if (!raw) return null;
+  const url = [raw.profile, raw.profile_medium].find((u) => typeof u === "string" && u.startsWith("https://"));
+  return {
+    id: raw.id ?? null,
+    firstname: raw.firstname ?? "",
+    lastname: raw.lastname ?? "",
+    avatarUrl: url ?? null,
+  };
+}
+
+export function cacheAthlete(athlete) {
+  try {
+    if (athlete) localStorage.setItem(ATHLETE_KEY, JSON.stringify(athlete));
+    else localStorage.removeItem(ATHLETE_KEY);
+  } catch {
+    /* ignorieren */
+  }
+}
+
+export function cachedAthlete() {
+  try {
+    return JSON.parse(localStorage.getItem(ATHLETE_KEY) ?? "null");
+  } catch {
+    return null;
+  }
+}
+
+/** Lädt Name und Profilbild des verbundenen Athleten (Scope "read", immer enthalten). */
+export async function fetchAthlete() {
+  const athlete = toAthlete(await stravaGet("/athlete"));
+  cacheAthlete(athlete);
+  return athlete;
 }
 
 /** Eine Seite Aktivitäten des eingeloggten Athleten (Rohdaten von Strava). */

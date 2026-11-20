@@ -19,8 +19,8 @@ export function render(container) {
       <p class="muted">
         Du wirst zu Strava weitergeleitet und bestätigst dort den Zugriff. Wichtig: den Haken bei
         „Daten zu deinen Aktivitäten anzeigen, auch private“ gesetzt lassen. Danach kommst du hierher zurück.
-        Die Strava-Tokens werden nur in diesem Browser gespeichert – auf einem anderen Gerät musst du
-        einmal neu verbinden.
+        Die Verbindung wird in deinem geschützten Firebase-Bereich gespeichert – nach dem Login steht sie
+        auf allen Geräten und Adressen zur Verfügung, du musst dich nur einmal verbinden.
       </p>
       <p class="muted">Rückleitungs-Adresse: <code id="connect-redirect"></code></p>
     </section>`;

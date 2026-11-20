@@ -10,17 +10,18 @@ import {
   setPlanCheck,
 } from "../firebase.js";
 import { ANALYSIS_MODES, getRecommendation, getSeasonPlan } from "../gemini.js";
-import { disciplineStats, evaluatePlan, historyStats, STATUS_INFO } from "../plan-tracking.js";
-import { currentSeasonContext, evaluateSeason, seasonStats, seasonWeekStarts, weekActuals } from "../season.js";
+import { athleticsDays, disciplineStats, evaluatePlan, historyStats, STATUS_INFO } from "../plan-tracking.js";
+import { currentSeasonContext, evaluateSeason, seasonStats, seasonWeekStarts } from "../season.js";
 
 const SPORT_SHORT = { Run: "Lauf", TrailRun: "Traillauf", Ride: "Rad", VirtualRide: "Rad (virtuell)", GravelRide: "Gravel", MountainBikeRide: "MTB", Walk: "Gehen", Hike: "Wandern", WeightTraining: "Kraft", Workout: "Training", Yoga: "Yoga" };
 
 /** Element mit Text (immer textContent, nie HTML). */
-function el(tag, { className, text, title } = {}, ...children) {
+function el(tag, { className, text, title, ...attrs } = {}, ...children) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   if (title) node.title = title;
+  for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, value);
   node.append(...children);
   return node;
 }
@@ -100,7 +101,8 @@ export function render(container) {
     dayStatus = "Erstelle Tagesplan …";
     renderPage();
     try {
-      const summary = summaryForAi(activities, profile, { seasonContext: currentSeasonContext(season?.plan) });
+      const seasonContext = currentSeasonContext(season?.plan, new Date(), athleticsDays(analyses, activities));
+      const summary = summaryForAi(activities, profile, { seasonContext });
       const { recommendation, model } = await getRecommendation(summary, {
         mode,
         onStatus: (text, info) => {
@@ -195,7 +197,7 @@ export function render(container) {
     }
 
     if (!season) {
-      card.append(el("p", { text: `${weekStarts.length} Wochen bis zum Wettkampf am ${shortDate(raceDate)}. Gemini plant Phasen und Wochenziele (Lauf-km, langer Lauf, Rad-Stunden, Schlüsseleinheiten). Die 7-Tage-Empfehlung richtet sich danach.` }));
+      card.append(el("p", { text: `${weekStarts.length} Wochen bis zum Wettkampf am ${shortDate(raceDate)}. Gemini plant Phasen und Wochenziele (Lauf-km, langer Lauf, Rad-Stunden, Kraft- und Dehneinheiten, Schlüsseleinheiten). Die 7-Tage-Empfehlung richtet sich danach.` }));
     }
     card.append(seasonButtons());
     if (seasonBusy && seasonStatus) card.append(statusLine(seasonStatus));
@@ -223,20 +225,24 @@ export function render(container) {
         el("td", { className: "num", text: w.state === "future" ? num(w.runKm) : sollIst(w.runKm, w.actual.runKm) }),
         el("td", { className: "num", text: w.state === "future" ? num(w.longRunKm) : sollIst(w.longRunKm, w.actual.longRunKm) }),
         el("td", { className: "num", text: w.state === "future" ? num(w.rideHours, 1) : sollIst(w.rideHours, w.actual.rideHours, 1) }),
+        el("td", { className: "num", text: w.state === "future" ? num(w.strengthSessions) : sollIst(w.strengthSessions, w.actual.strengthSessions) }),
+        el("td", { className: "num", text: w.state === "future" ? num(w.mobilitySessions) : sollIst(w.mobilitySessions, w.actual.mobilitySessions) }),
         el("td", { className: "wrap" }, el("ul", { className: "compact" }, ...w.keySessions.map((k) => el("li", { text: k })))),
         // laufende Woche neutral anzeigen – sie ist noch nicht abgeschlossen
         el("td", { className: "num" }, fulfil ? el("span", { className: `badge ${w.state === "current" ? "neutral" : rateLevel(w.fulfilment)}`, text: w.state === "current" ? `bisher ${fulfil}` : fulfil }) : ""));
     });
-    const seasonTable = table([["Woche"], ["Phase"], ["Fokus"], ["Lauf km", "num"], ["Lang", "num"], ["Rad h", "num"], ["Schlüsseleinheiten"], ["Erfüllung", "num"]], rows);
+    const seasonTable = table([["Woche"], ["Phase"], ["Fokus"], ["Lauf km", "num"], ["Lang", "num"], ["Rad h", "num"], ["Kraft", "num"], ["Dehnen", "num"], ["Schlüsseleinheiten"], ["Erfüllung", "num"]], rows);
     seasonTable.classList.add("season-table");
     card.append(
       seasonTable,
-      el("p", { className: "muted", text: "Vergangene/laufende Wochen: Ist / Soll. „Lang“ = längster Lauf (km). Erfüllung = Ø aus Lauf-km, langem Lauf und Rad-Stunden (je max. 100 %)." }),
+      el("p", { className: "muted", text: "Vergangene/laufende Wochen: Ist / Soll. „Lang“ = längster Lauf (km). Kraft/Dehnen = Anzahl Tage mit erledigter Einheit (abgehakt oder bei Strava). Erfüllung = Ø aus allen Wochenzielen (je max. 100 %)." }),
       el("p", {}, el("strong", { text: "Wettkampf: " }), plan.raceStrategy));
     return card;
   }
 
   // ---------- Diese Woche: Wochenziele + Tagesplan ----------
+
+  const expanded = new Set(); // aufgeklappte Tage (ISO-Datum), bleibt beim Neuzeichnen erhalten
 
   function dayPlanButtons(hasPlan) {
     return el("div", { className: "button-row" },
@@ -252,24 +258,10 @@ export function render(container) {
       }));
   }
 
-  function renderWeekTargets(ctx) {
-    const w = ctx.thisWeek;
-    const actual = weekActuals(w.weekStart, activities);
-    return el("div", { className: "week-targets" },
-      el("p", { className: "eyebrow", text: `Woche ${ctx.weekNumber} von ${ctx.totalWeeks} · ${w.phase}${w.recoveryWeek ? " · Entlastungswoche" : ""}` }),
-      el("p", { text: w.focus }),
-      el("div", { className: "target-row" },
-        el("span", { className: "target" }, el("strong", { text: `${num(actual.runKm)} / ${num(w.runKm)} km` }), " Lauf"),
-        el("span", { className: "target" }, el("strong", { text: `${num(actual.longRunKm)} / ${num(w.longRunKm)} km` }), " langer Lauf"),
-        el("span", { className: "target" }, el("strong", { text: `${num(actual.rideHours, 1)} / ${num(w.rideHours, 1)} h` }), " Rad")),
-      el("p", { className: "muted", text: `Schlüsseleinheiten: ${w.keySessions.join(" · ")}` }));
-  }
-
   function renderWeekCard(current, days, ctx) {
     const card = el("section", { className: "card" }, el("h2", { text: "Diese Woche" }));
-    if (ctx) card.append(renderWeekTargets(ctx));
-    else if (season) card.append(el("p", { className: "muted", text: "Die aktuelle Woche liegt außerhalb des Saisonplans." }));
-    else card.append(el("p", { className: "muted", text: "Ohne Saisonplan plant Gemini die Tage nur anhand deiner bisherigen Daten. Erstelle unten einen Saisonplan für Wochenziele bis zum Wettkampf." }));
+    if (!ctx && season) card.append(el("p", { className: "muted", text: "Die aktuelle Woche liegt außerhalb des Saisonplans." }));
+    else if (!ctx) card.append(el("p", { className: "muted", text: "Ohne Saisonplan plant Gemini die Tage nur anhand deiner bisherigen Daten. Erstelle unten einen Saisonplan für Wochenziele bis zum Wettkampf." }));
 
     // Hinweise: abgelaufen oder älter als der aktuelle Saisonplan
     const now = new Date();
@@ -287,12 +279,36 @@ export function render(container) {
     if (!current) return card;
 
     const checks = current.checks ?? {};
-    const rows = days.map((d) => {
+    const COLUMNS = 6;
+
+    /** Schritt-für-Schritt-Anleitung als nummerierte Liste. */
+    const stepsBlock = (heading, meta, steps, fallback) =>
+      el("div", { className: "detail-block" },
+        el("p", { className: "detail-heading" }, el("strong", { text: heading }), meta ? el("span", { className: "muted", text: ` · ${meta}` }) : ""),
+        steps?.length
+          ? el("ol", { className: "steps" }, ...steps.map((st) => el("li", {}, el("strong", { text: st.title }), el("span", { text: ` – ${st.detail}` }))))
+          : el("p", { className: "muted", text: fallback }));
+
+    const checkbox = (checked, title, onChange) => {
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = checked;
+      box.title = title;
+      box.addEventListener("change", () => onChange(box.checked));
+      return box;
+    };
+
+    const rows = days.flatMap((d) => {
       const s = d.session;
       const info = STATUS_INFO[d.status];
+      const open = expanded.has(d.date);
+      const hasDetails = Boolean(s.steps?.length || s.supplement?.steps?.length || s.optionalExtra?.steps?.length);
+
       const planCell = el("td", { className: "wrap" },
+        el("span", { className: "chevron", text: open ? "▾" : "▸", "aria-hidden": "true" }),
         el("strong", { text: s.sport === "Ruhetag" ? "Ruhetag" : `${s.sport}: ${s.title}` }),
-        el("div", { className: "muted", text: s.sport === "Ruhetag" ? s.description : `${s.durationMin} min · ${s.intensity} · ${s.description}` }));
+        el("div", { className: "muted", text: s.sport === "Ruhetag" ? s.description : `${s.durationMin} min · ${s.intensity} · ${s.description}` }),
+        s.supplement ? el("div", { className: "supplement-line", text: `+ ${s.supplement.kind}: ${s.supplement.title} (${s.supplement.durationMin} min)` }) : "");
       const actualText = d.actual.length
         ? d.actual.map((a) => `${SPORT_SHORT[a.sportType] ?? a.sportType} ${Math.round((a.movingTime ?? 0) / 60)} min`).join(", ")
         : "–";
@@ -300,34 +316,74 @@ export function render(container) {
         el("span", { className: `badge ${info.level}`, text: `${info.icon} ${info.label}` }),
         d.manual ? el("div", { className: "muted small", text: "manuell" }) : "");
 
-      const extraCell = el("td", { className: "wrap optional" });
-      if (s.optionalExtra) {
-        const box = document.createElement("input");
-        box.type = "checkbox";
-        box.checked = d.extraDone;
-        box.title = "Zusatz erledigt";
-        box.addEventListener("change", () => setCheck(current, d.date, { ...checks[d.date], extra: box.checked }));
-        extraCell.append(el("label", { className: "extra-check" }, box, ` + ${s.optionalExtra.title} (${s.optionalExtra.durationMin} min)`));
-      } else {
-        extraCell.textContent = "–";
+      // Zusätze: fester Kraft-/Dehnblock (gehört zum Plan) + freiwilliger Zusatz
+      const extrasCell = el("td", { className: "wrap optional" });
+      if (s.supplement) {
+        extrasCell.append(el("label", { className: "extra-check supplement" },
+          checkbox(d.supplementDone, "Kraft-/Dehnblock erledigt", (v) => setCheck(current, d.date, { ...checks[d.date], supplement: v })),
+          ` ${s.supplement.kind} (${s.supplement.durationMin} min)`));
       }
+      if (s.optionalExtra) {
+        extrasCell.append(el("label", { className: "extra-check" },
+          checkbox(d.extraDone, "Optionalen Zusatz erledigt", (v) => setCheck(current, d.date, { ...checks[d.date], extra: v })),
+          ` optional: ${s.optionalExtra.title} (${s.optionalExtra.durationMin} min)`));
+      }
+      if (!s.supplement && !s.optionalExtra) extrasCell.textContent = "–";
 
       const actions = el("td", {},
         el("div", { className: "button-row nowrap plan-actions" },
           smallButton("✓", "Als erledigt abhaken", () => setCheck(current, d.date, { ...checks[d.date], status: "done" }), { pressed: d.manual === "done" }),
           smallButton("✗", "Als ausgelassen markieren", () => setCheck(current, d.date, { ...checks[d.date], status: "skipped" }), { pressed: d.manual === "skipped" }),
-          smallButton("↺", "Zurück zur Automatik", () => setCheck(current, d.date, { status: null, extra: null }))));
+          smallButton("↺", "Zurück zur Automatik", () => setCheck(current, d.date, { status: null, extra: null, supplement: null }))));
 
-      return el("tr", { className: d.status === "today" ? "is-today" : "" },
-        el("td", { text: dayLabel(d.date) }), planCell, el("td", { text: actualText }), statusCell, extraCell, actions);
+      const row = el("tr", { className: `session-row${d.status === "today" ? " is-today" : ""}${open ? " is-open" : ""}` },
+        el("td", { text: dayLabel(d.date) }), planCell, el("td", { text: actualText }), statusCell, extrasCell, actions);
+      row.tabIndex = 0;
+      row.setAttribute("aria-expanded", String(open));
+      row.title = "Klicken für die Detailanleitung";
+      const toggle = () => {
+        if (open) expanded.delete(d.date);
+        else expanded.add(d.date);
+        renderPage();
+      };
+      row.addEventListener("click", (event) => {
+        if (event.target.closest("button, input, label, a")) return; // Abhaken nicht als Aufklappen werten
+        toggle();
+      });
+      row.addEventListener("keydown", (event) => {
+        if ((event.key === "Enter" || event.key === " ") && event.target === row) {
+          event.preventDefault();
+          toggle();
+        }
+      });
+      if (!open) return [row];
+
+      const blocks = [];
+      if (s.sport === "Ruhetag") {
+        blocks.push(stepsBlock("Ruhetag", null, s.steps, s.description || "Erholung – keine Einheit geplant."));
+      } else {
+        blocks.push(stepsBlock(`${s.sport}: ${s.title}`, `${s.durationMin} min · ${s.intensity}`, s.steps, s.description));
+      }
+      if (s.supplement) {
+        blocks.push(stepsBlock(`${s.supplement.kind}: ${s.supplement.title}`, `${s.supplement.durationMin} min · gehört zum Plan`, s.supplement.steps, "Keine Detailanleitung vorhanden."));
+      }
+      if (s.optionalExtra) {
+        blocks.push(stepsBlock(`Optional: ${s.optionalExtra.title}`, `${s.optionalExtra.durationMin} min · nur wenn du dich gut fühlst`, s.optionalExtra.steps, s.optionalExtra.description));
+      }
+      if (!hasDetails) {
+        blocks.push(el("p", { className: "muted", text: "Für diesen Tagesplan gibt es noch keine Schritt-für-Schritt-Anleitung. Aktualisiere den Tagesplan, um sie zu bekommen." }));
+      }
+      const cell = el("td", {}, el("div", { className: "detail-grid" }, ...blocks));
+      cell.colSpan = COLUMNS;
+      return [row, el("tr", { className: "detail-row" }, cell)];
     });
 
     const when = current.createdAtMs ? new Date(current.createdAtMs).toLocaleString("de-DE") : "";
     card.append(
       el("h3", { text: "Tagesplan" }),
-      el("p", { className: "muted", text: `Erstellt ${when} · ${ANALYSIS_MODES[current.mode]?.label ?? "Analyse"} · ${current.model}` }),
-      table([["Tag"], ["Plan"], ["Ist (Strava)"], ["Status"], ["Optional"], ["Abhaken"]], rows),
-      el("p", { className: "muted", text: "Automatisch abgehakt wird anhand der importierten Aktivitäten (Seite „Aktivitäten“ → importieren). Mit ✓/✗ überstimmst du die Automatik, ↺ setzt zurück." }));
+      el("p", { className: "muted", text: `Erstellt ${when} · ${ANALYSIS_MODES[current.mode]?.label ?? "Analyse"} · ${current.model} · Tipp: Auf eine Einheit klicken für die Detailanleitung.` }),
+      table([["Tag"], ["Plan"], ["Ist (Strava)"], ["Status"], ["Zusätze"], ["Abhaken"]], rows),
+      el("p", { className: "muted", text: "Automatisch abgehakt wird anhand der importierten Aktivitäten (Seite „Aktivitäten“ → importieren). Kraft und Dehnen landen oft nicht bei Strava – dann einfach selbst abhaken. Mit ✓/✗ überstimmst du die Automatik, ↺ setzt zurück." }));
     if (current.recommendation.extraBudget) {
       card.append(el("p", {},
         el("strong", { text: "Spielraum für Extras: " }),
@@ -343,7 +399,8 @@ export function render(container) {
     const days = current ? evaluatePlan(current.recommendation, activities, current.checks ?? {}) : [];
     const weekStats = disciplineStats(days);
     const history = historyStats(analyses, activities);
-    const evaluatedSeason = season ? evaluateSeason(season.plan, activities) : [];
+    const athletics = athleticsDays(analyses, activities);
+    const evaluatedSeason = season ? evaluateSeason(season.plan, activities, new Date(), athletics) : [];
     const seasonRate = seasonStats(evaluatedSeason);
 
     const statTile = (heading, rate, note) =>
@@ -352,7 +409,9 @@ export function render(container) {
         el("p", { className: `stat-value ${rateLevel(rate)}`, text: pct(rate) }),
         el("p", { className: "muted", text: note }));
     const dayNote = (s, empty) =>
-      s.countedDays ? `${s.fullDays} von ${s.countedDays} Tagen voll erfüllt · Extras ${s.extrasDone}/${s.extrasOffered}` : empty;
+      s.countedDays
+        ? `${s.fullDays} von ${s.countedDays} Tagen voll erfüllt · Kraft/Dehnen ${s.supplementsDone}/${s.supplementsOffered} · Extras ${s.extrasDone}/${s.extrasOffered}`
+        : empty;
 
     const discipline = el("section", { className: "card" },
       el("h2", { text: "Disziplin" }),

@@ -10,11 +10,10 @@ rules_version = '2';
 //   users/{uid}                              – Profil / Einstellungen ohne Geheimnisse
 //   users/{uid}/activities/{activityId}      – normalisierte Strava-Aktivitäten
 //   users/{uid}/analyses/{analysisId}        – Auswertungen und KI-Empfehlungen (Gemini)
-//   users/{uid}/plans/{planId}               – Trainingspläne
-//   users/{uid}/private/secrets              – Strava Client ID/Secret, Gemini API-Key
-//                                              (Klartext, nur für den Eigentümer lesbar)
-//
-// Strava Access-/Refresh-Tokens bleiben nur im localStorage des Browsers.
+//   users/{uid}/plans/{planId}               – Saisonpläne
+//   users/{uid}/reviews/{reviewId}           – Wochenrückblicke von Gemini
+//   users/{uid}/private/secrets              – Strava Client ID/Secret, Gemini API-Key,
+//                                              Strava-Tokens (Klartext, nur für den Eigentümer lesbar)
 //
 // Einfügen in der Firebase-Konsole: Firestore Database → Regeln → Inhalt ersetzen → Veröffentlichen.
 
@@ -40,15 +39,23 @@ service cloud.firestore {
         allow read, write: if isOwner(uid);
       }
 
+      match /reviews/{reviewId} {
+        allow read, write: if isOwner(uid);
+      }
+
       // Schlüssel-Dokument: nur der Eigentümer, nur bekannte Felder, nur Text.
       match /private/secrets {
         allow read, delete: if isOwner(uid);
         allow create, update: if isOwner(uid)
           && request.resource.data.keys().hasOnly(
-               ['stravaClientId', 'stravaClientSecret', 'geminiApiKey', 'updatedAt'])
+               ['stravaClientId', 'stravaClientSecret', 'geminiApiKey',
+                'stravaAccessToken', 'stravaRefreshToken', 'stravaExpiresAt', 'updatedAt'])
           && (!('stravaClientId' in request.resource.data) || request.resource.data.stravaClientId is string)
           && (!('stravaClientSecret' in request.resource.data) || request.resource.data.stravaClientSecret is string)
-          && (!('geminiApiKey' in request.resource.data) || request.resource.data.geminiApiKey is string);
+          && (!('geminiApiKey' in request.resource.data) || request.resource.data.geminiApiKey is string)
+          && (!('stravaAccessToken' in request.resource.data) || request.resource.data.stravaAccessToken is string)
+          && (!('stravaRefreshToken' in request.resource.data) || request.resource.data.stravaRefreshToken is string)
+          && (!('stravaExpiresAt' in request.resource.data) || request.resource.data.stravaExpiresAt is string);
       }
     }
   }

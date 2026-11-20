@@ -121,13 +121,14 @@ function secretsRef(uid) {
  * Das Dokument wird komplett neu geschrieben (ohne merge) und enthält nur `allowedKeys` –
  * so verschwinden veraltete Felder (z. B. ein früherer anthropicApiKey), die die Rules ablehnen würden.
  */
-export async function saveSecretsToFirestore(values, allowedKeys) {
+export async function saveSecretsToFirestore(values, allowedKeys, { remove = [] } = {}) {
   const user = requireUser();
   const ref = secretsRef(user.uid);
   const snapshot = await getDoc(ref);
   const existing = snapshot.exists() ? snapshot.data() : {};
   const data = {};
   for (const key of allowedKeys) {
+    if (remove.includes(key)) continue; // gezielt löschen (z. B. Strava-Tokens beim Trennen)
     const value = values[key] || existing[key];
     if (typeof value === "string" && value) data[key] = value;
   }
@@ -204,6 +205,18 @@ export async function getProfile() {
   return snapshot.exists() ? (snapshot.data().profile ?? {}) : {};
 }
 
+/** Strava-Name und Bild-Link ({ firstname, lastname, avatarUrl }) oder null. */
+export async function getStravaAthlete() {
+  const user = requireUser();
+  const snapshot = await getDoc(userRef(user.uid));
+  return snapshot.exists() ? (snapshot.data().stravaAthlete ?? null) : null;
+}
+
+export async function saveStravaAthlete(athlete) {
+  const user = requireUser();
+  await setDoc(userRef(user.uid), { stravaAthlete: athlete }, { merge: true });
+}
+
 export async function saveProfile(profile) {
   const user = requireUser();
   await setDoc(userRef(user.uid), { profile, profileUpdatedAt: serverTimestamp() }, { merge: true });
@@ -257,6 +270,32 @@ export async function setPlanCheck(analysisId, date, check) {
   else delete checks[date];
   await setDoc(ref, { checks }, { merge: true });
   return checks;
+}
+
+// ---------- Wochenrückblicke: users/{uid}/reviews/{autoId} ----------
+
+function reviewsRef(uid) {
+  return collection(db, "users", uid, "reviews");
+}
+
+export async function saveReview({ model, mode = null, period, review }) {
+  const user = requireUser();
+  const ref = await addDoc(reviewsRef(user.uid), {
+    model,
+    mode,
+    period,
+    review,
+    createdAt: serverTimestamp(),
+    createdAtMs: Date.now(),
+  });
+  return ref.id;
+}
+
+/** Neuester Wochenrückblick oder null. */
+export async function latestReview() {
+  const user = requireUser();
+  const snapshot = await getDocs(query(reviewsRef(user.uid), orderBy("createdAtMs", "desc"), limit(1)));
+  return snapshot.empty ? null : { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
 }
 
 // ---------- Saisonpläne: users/{uid}/plans/{autoId} ----------

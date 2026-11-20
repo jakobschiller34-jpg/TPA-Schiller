@@ -1,8 +1,28 @@
 // Einstiegspunkt: Hash-Router, Login-Status im Kopfbereich, Strava-Callback-Erkennung.
 
-import { currentUser, firebaseReady, logout, onUserChanged } from "./firebase.js";
-import { pullMissingSecrets } from "./secrets-sync.js";
-import { handleCallback } from "./strava.js";
+import {
+  currentUser,
+  firebaseReady,
+  getStravaAthlete,
+  logout,
+  onUserChanged,
+  saveStravaAthlete,
+} from "./firebase.js";
+import { clearRemoteStravaTokens, pullMissingSecrets, pushStravaTokens, reconcileStravaTokens } from "./secrets-sync.js";
+import { cachedAthlete, fetchAthlete, handleCallback, isConnected, setTokenSyncHooks } from "./strava.js";
+
+// Strava-Verbindung über Firestore auf allen Geräten/Adressen erhalten (nur wenn angemeldet).
+setTokenSyncHooks({
+  onStored: () => {
+    if (currentUser()) pushStravaTokens();
+  },
+  beforeRefresh: async () => {
+    if (currentUser()) await reconcileStravaTokens();
+  },
+  onCleared: () => {
+    if (currentUser()) clearRemoteStravaTokens();
+  },
+});
 
 import * as login from "./views/login.js";
 import * as verbinden from "./views/verbinden.js";
@@ -18,6 +38,7 @@ const DEFAULT_ROUTE = "login";
 const view = document.getElementById("view");
 const navLinks = document.querySelectorAll(".main-nav a[data-route]");
 const userName = document.getElementById("user-name");
+const userAvatar = document.getElementById("user-avatar");
 const logoutButton = document.getElementById("logout-button");
 
 /** Seiten, die ohne Anmeldung erreichbar sind. */
@@ -102,9 +123,56 @@ async function handleStravaRedirect() {
   }
 }
 
+/** Zeigt Profilbild oder Initialen (aus Strava-Name bzw. E-Mail). */
+function showAvatar(user, athlete) {
+  userAvatar.replaceChildren();
+  userAvatar.hidden = !user;
+  if (!user) return;
+  if (athlete?.avatarUrl) {
+    const img = document.createElement("img");
+    img.src = athlete.avatarUrl;
+    img.alt = "";
+    img.referrerPolicy = "no-referrer";
+    img.addEventListener("error", () => showAvatar(user, { ...athlete, avatarUrl: null }));
+    userAvatar.append(img);
+    return;
+  }
+  const name = [athlete?.firstname, athlete?.lastname].filter(Boolean).join(" ") || user.email || "?";
+  const initials = name
+    .split(/[\s@._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join("");
+  userAvatar.textContent = initials || "?";
+}
+
+/**
+ * Profilbild besorgen: lokaler Cache → Firestore → Strava (nur wenn verbunden).
+ * Neu von Strava geholte Daten werden in Firestore abgelegt (für andere Geräte).
+ */
+async function loadAvatar(user) {
+  showAvatar(user, cachedAthlete());
+  try {
+    let athlete = cachedAthlete();
+    const stored = await getStravaAthlete();
+    if (athlete && JSON.stringify(athlete) !== JSON.stringify(stored)) await saveStravaAthlete(athlete);
+    athlete ??= stored;
+    if (!athlete && isConnected()) {
+      athlete = await fetchAthlete();
+      if (athlete) await saveStravaAthlete(athlete);
+    }
+    if (currentUser()?.uid === user.uid) showAvatar(user, athlete);
+  } catch (error) {
+    console.warn("Profilbild:", error.message);
+  }
+}
+
 onUserChanged((user) => {
   userName.textContent = user ? (user.displayName ?? user.email ?? "Angemeldet") : "Nicht angemeldet";
   logoutButton.hidden = !user;
+  if (user) loadAvatar(user);
+  else showAvatar(null, null);
 
   const firstAnswer = !authReady;
   authUser = user;
@@ -112,11 +180,12 @@ onUserChanged((user) => {
   // Erstes Ergebnis: Seite jetzt rendern. Abmeldung: Sperre greift sofort.
   if (firstAnswer || (!user && !PUBLIC_ROUTES.has(currentRoute()))) render();
 
-  // Nach dem Login fehlende Schlüssel aus Firestore in den localStorage holen.
+  // Nach dem Login fehlende Schlüssel holen und Strava-Tokens abgleichen
+  // (z. B. Verbindung, die vor dem Login über die Strava-Rückleitung entstand, hochladen).
   if (user) {
     pullMissingSecrets()
       .then((count) => {
-        if (count > 0 && currentRoute() === "einstellungen") render();
+        if (count > 0 && ["einstellungen", "verbinden", "aktivitaeten"].includes(currentRoute())) render();
       })
       .catch((error) => console.warn("Schlüssel aus Firebase laden:", error.message));
   }

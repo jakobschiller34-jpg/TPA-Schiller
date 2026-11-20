@@ -17,7 +17,7 @@ export function render(container) {
     </section>
     <section class="card">
       <h2>Firebase-Abgleich</h2>
-      <p class="muted">Erfordert Anmeldung. Abgeglichen werden Strava Client ID, Strava Client Secret und Gemini API-Key.</p>
+      <p class="muted">Erfordert Anmeldung. Abgeglichen werden Strava Client ID, Strava Client Secret, Gemini API-Key und die Strava-Verbindung (Tokens).</p>
       <div class="button-row">
         <button id="settings-push" class="button" type="button">In Firebase speichern</button>
         <button id="settings-pull" class="button button-secondary" type="button">Aus Firebase laden</button>

@@ -1,6 +1,16 @@
-import { analyze, SPORT_GROUPS, ZONES } from "../analysis.js";
-import { getProfile, latestAnalysis, listActivities, onUserChanged, saveProfile } from "../firebase.js";
-import { ANALYSIS_MODES } from "../gemini.js";
+import { analyze, SPORT_GROUPS, summaryForAi, todayDay, ZONES } from "../analysis.js";
+import {
+  getProfile,
+  latestAnalysis,
+  latestReview,
+  listActivities,
+  listAnalyses,
+  onUserChanged,
+  saveProfile,
+  saveReview,
+} from "../firebase.js";
+import { ANALYSIS_MODES, getWeeklyReview } from "../gemini.js";
+import { adherenceForAi } from "../plan-tracking.js";
 
 const MAX_ACTIVITIES = 1000;
 
@@ -112,6 +122,11 @@ export function render(container) {
         <label>Ziel
           <input name="rideGoal" type="text" maxlength="200" />
         </label>
+        <h3>Krafttraining</h3>
+        <label>Ausstattung zu Hause
+          <input name="strengthEquipment" type="text" maxlength="150" placeholder="z. B. Kurzhanteln 2 × 8 kg, Theraband, Klimmzugstange" />
+          <span class="hint">Leer = nur Körpergewicht. Gemini wählt die Übungen danach aus.</span>
+        </label>
         <div class="button-row">
           <button class="button" type="submit">Profil speichern</button>
         </div>
@@ -142,6 +157,7 @@ export function render(container) {
     form.runDistance.value = profile.runGoal?.distanceKm ?? "";
     form.runTargetTime.value = profile.runGoal?.targetTime ?? "";
     form.rideGoal.value = profile.rideGoal ?? "Allgemeine Leistungssteigerung";
+    form.strengthEquipment.value = profile.strengthEquipment ?? "";
     details.open = !profile.maxHeartrate; // beim ersten Mal aufgeklappt
   }
 
@@ -157,6 +173,7 @@ export function render(container) {
         targetTime: form.runTargetTime.value.trim(),
       },
       rideGoal: form.rideGoal.value.trim(),
+      strengthEquipment: form.strengthEquipment.value.trim(),
     };
     const error = validateProfile(next);
     if (error) {
@@ -197,7 +214,7 @@ export function render(container) {
       cards.push(el("section", { className: "card highlight" }, el("h2", { text: "Wettkampf" }), el("p", { text })));
     }
 
-    cards.push(renderGeminiCard());
+    cards.push(renderReviewCard(), renderGeminiCard());
 
     // Belastung
     cards.push(
@@ -340,6 +357,105 @@ export function render(container) {
 
   let latest = null; // neueste gespeicherte Empfehlung
 
+  // ---------- Wochenrückblick (Rückmeldung zu den letzten 7 Tagen, kein Plan) ----------
+
+  let analyses = []; // Tagespläne – für die Planerfüllung im Rückblick
+  let review = null; // neuester gespeicherter Rückblick
+  let reviewBusy = null;
+  let reviewStatus = "";
+  let reviewError = "";
+  let waitStartedMs = 0;
+
+  const waitTimer = setInterval(() => {
+    if (!container.isConnected) {
+      clearInterval(waitTimer);
+      return;
+    }
+    const statusEl = container.querySelector(".gemini-status");
+    if (statusEl && waitStartedMs) {
+      statusEl.textContent = `${statusEl.dataset.text} ${Math.round((Date.now() - waitStartedMs) / 1000)} s`;
+    }
+  }, 1000);
+
+  const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
+  const shortDate = (iso) =>
+    new Date(`${iso}T00:00:00Z`).toLocaleDateString("de-DE", { timeZone: "UTC", day: "2-digit", month: "2-digit" });
+
+  async function requestReview(mode) {
+    reviewBusy = mode;
+    reviewError = "";
+    reviewStatus = "Erstelle Wochenrückblick …";
+    renderResults();
+    try {
+      const today = todayDay(new Date());
+      const period = { from: isoDay(today - 6 * 24 * 3600 * 1000), to: isoDay(today) };
+      const { review: result, model } = await getWeeklyReview(
+        { summary: summaryForAi(activities, profile), period, planAdherence: adherenceForAi(analyses, activities) },
+        {
+          mode,
+          onStatus: (text, info) => {
+            reviewStatus = text;
+            if (info?.waitingFor) waitStartedMs = Date.now();
+            renderResults();
+          },
+        },
+      );
+      const id = await saveReview({ model, mode, period, review: result });
+      review = { id, model, mode, period, review: result, createdAtMs: Date.now() };
+    } catch (error) {
+      reviewError = error.message;
+    } finally {
+      reviewBusy = null;
+      reviewStatus = "";
+      waitStartedMs = 0;
+      renderResults();
+    }
+  }
+
+  function renderReviewCard() {
+    const card = el("section", { className: "card review-card" }, el("h2", { text: "Wochenrückblick" }));
+    card.append(
+      el("p", { className: "muted", text: "Rückmeldung von Gemini zu deinen letzten 7 Tagen – Umfang, Qualität, Planerfüllung und Erholung. Ohne neuen Plan." }),
+      el("div", { className: "button-row" },
+        ...Object.entries(ANALYSIS_MODES).map(([mode, cfg]) => {
+          const b = el("button", {
+            className: mode === "quick" ? "button" : "button button-secondary",
+            text: reviewBusy === mode ? "Gemini schaut zurück …" : `Rückblick: ${cfg.label.replace(" Analyse", "")} (${cfg.hint})`,
+          });
+          b.type = "button";
+          b.disabled = Boolean(reviewBusy);
+          b.addEventListener("click", () => requestReview(mode));
+          return b;
+        })),
+    );
+    if (reviewBusy && reviewStatus) {
+      const status = el("p", { className: "muted gemini-status", text: reviewStatus });
+      status.dataset.text = reviewStatus;
+      card.append(status);
+    }
+    if (reviewError) card.append(el("p", { className: "message error", text: reviewError }));
+    if (!review) return card;
+
+    const r = review.review;
+    const when = review.createdAtMs ? new Date(review.createdAtMs).toLocaleString("de-DE") : "";
+    const stars = "★".repeat(r.rating) + "☆".repeat(5 - r.rating);
+    card.append(
+      el("div", { className: "review-head" },
+        el("p", { className: "eyebrow", text: `${shortDate(review.period.from)} – ${shortDate(review.period.to)}` }),
+        el("p", { className: "review-title" }, el("strong", { text: r.headline }), " ", el("span", { className: "stars", text: stars, title: `${r.rating} von 5` }))),
+      el("p", { text: r.summary }),
+      el("p", {}, el("strong", { text: "Planerfüllung: " }), r.adherence),
+      el("h3", { text: "Gut gelaufen" }),
+      el("ul", {}, ...r.highlights.map((t) => el("li", { text: t }))),
+      el("h3", { text: "Besser machen" }),
+      el("ul", {}, ...r.improvements.map((t) => el("li", { text: t }))),
+      el("p", {}, el("strong", { text: "Erholung: " }), r.recovery),
+      el("p", {}, el("strong", { text: "Nächste Woche: " }), r.nextWeekFocus),
+      el("p", { className: "muted", text: `Stand ${when} · ${ANALYSIS_MODES[review.mode]?.label ?? "Analyse"} · ${review.model}` }),
+    );
+    return card;
+  }
+
   function renderGeminiCard() {
     const card = el("section", { className: "card" }, el("h2", { text: "Einschätzung von Gemini" }));
     const link = el("a", { className: "button button-secondary", text: "Zum Trainingsplan →" });
@@ -374,10 +490,12 @@ export function render(container) {
 
   async function load() {
     try {
-      [profile, activities, latest] = await Promise.all([
+      [profile, activities, latest, review, analyses] = await Promise.all([
         getProfile(),
         listActivities({ max: MAX_ACTIVITIES }),
         latestAnalysis(),
+        latestReview(),
+        listAnalyses({ max: 20 }),
       ]);
       fillForm();
       renderResults();

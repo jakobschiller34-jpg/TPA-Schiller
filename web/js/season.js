@@ -24,11 +24,27 @@ export function seasonWeekStarts(raceDate, now = new Date()) {
   return weeks;
 }
 
-/** Ist-Werte einer Woche (Montag bis Sonntag). */
-export function weekActuals(weekStartIso, activities) {
+/** Anzahl der Tage aus `daySet` (ISO-Daten) in der Woche ab `start`. */
+function countInWeek(daySet, start) {
+  let count = 0;
+  for (let d = 0; d < 7; d++) if (daySet?.has(isoDay(start + d * DAY))) count++;
+  return count;
+}
+
+/**
+ * Ist-Werte einer Woche (Montag bis Sonntag).
+ * @param {{ strength: Set<string>, mobility: Set<string> }} [athletics] plan-tracking.athleticsDays()
+ */
+export function weekActuals(weekStartIso, activities, athletics = null) {
   const start = isoToDay(weekStartIso);
   const end = start + 7 * DAY;
-  const actual = { runKm: 0, longRunKm: 0, rideHours: 0 };
+  const actual = {
+    runKm: 0,
+    longRunKm: 0,
+    rideHours: 0,
+    strengthSessions: countInWeek(athletics?.strength, start),
+    mobilitySessions: countInWeek(athletics?.mobility, start),
+  };
   for (const a of activities) {
     const day = localDay(a);
     if (day < start || day >= end) continue;
@@ -49,18 +65,21 @@ const ratio = (actual, target) => (target > 0 ? Math.min(1, actual / target) : n
 
 /**
  * Wertet alle Wochen des Saisonplans aus.
- * Erfüllung = Mittelwert aus Lauf-km, langem Lauf und Rad-Stunden (jeweils max. 100 %, nur Ziele > 0).
+ * Erfüllung = Mittelwert aus Lauf-km, langem Lauf, Rad-Stunden, Kraft- und Dehneinheiten
+ * (jeweils max. 100 %, nur Ziele > 0; ältere Pläne ohne Kraft-/Dehnziele wie bisher).
  * Laufende Woche: Erfüllung wird angezeigt, zählt aber noch nicht in die Saison-Quote.
  */
-export function evaluateSeason(plan, activities, now = new Date()) {
+export function evaluateSeason(plan, activities, now = new Date(), athletics = null) {
   const thisWeek = weekStart(todayDay(now));
   return (plan?.weeks ?? []).map((week) => {
     const start = isoToDay(week.weekStart);
-    const actual = weekActuals(week.weekStart, activities);
+    const actual = weekActuals(week.weekStart, activities, athletics);
     const parts = [
       ratio(actual.runKm, week.runKm),
       ratio(actual.longRunKm, week.longRunKm),
       ratio(actual.rideHours, week.rideHours),
+      ratio(actual.strengthSessions, week.strengthSessions),
+      ratio(actual.mobilitySessions, week.mobilitySessions),
     ].filter((r) => r !== null);
     const fulfilment = parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : null;
     const state = start < thisWeek ? "past" : start === thisWeek ? "current" : "future";
@@ -78,7 +97,7 @@ export function seasonStats(evaluated) {
 }
 
 /** Ziele der aktuellen und der nächsten Woche (für die 7-Tage-Empfehlung). */
-export function currentSeasonContext(plan, now = new Date()) {
+export function currentSeasonContext(plan, now = new Date(), athletics = null) {
   if (!plan?.weeks?.length) return null;
   const thisWeek = isoDay(weekStart(todayDay(now)));
   const index = plan.weeks.findIndex((w) => w.weekStart === thisWeek);
@@ -91,13 +110,24 @@ export function currentSeasonContext(plan, now = new Date()) {
       runKm: w.runKm,
       longRunKm: w.longRunKm,
       rideHours: w.rideHours,
+      strengthSessions: w.strengthSessions ?? null,
+      mobilitySessions: w.mobilitySessions ?? null,
       keySessions: w.keySessions,
       recoveryWeek: w.recoveryWeek,
     };
+  const current = pick(plan.weeks[index]);
+  if (athletics) {
+    // Strava kennt manuell abgehakte Kraft-/Dehneinheiten nicht → Gemini mitteilen, was schon erledigt ist.
+    const start = isoToDay(current.weekStart);
+    current.doneSoFar = {
+      strengthSessions: countInWeek(athletics.strength, start),
+      mobilitySessions: countInWeek(athletics.mobility, start),
+    };
+  }
   return {
     weekNumber: index + 1,
     totalWeeks: plan.weeks.length,
-    thisWeek: pick(plan.weeks[index]),
+    thisWeek: current,
     nextWeek: pick(plan.weeks[index + 1]) ?? null,
   };
 }

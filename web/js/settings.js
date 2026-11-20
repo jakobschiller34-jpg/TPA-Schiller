@@ -14,10 +14,11 @@ export const SETTING_KEYS = {
   stravaClientId: { label: "Strava Client ID", secret: false, editable: true, sync: true },
   stravaClientSecret: { label: "Strava Client Secret", secret: true, editable: true, sync: true },
   geminiApiKey: { label: "Gemini API-Key", secret: true, editable: true, sync: true },
-  // Werden später automatisch durch den Strava-OAuth-Ablauf gesetzt:
-  stravaAccessToken: { label: "Strava Access Token", secret: true, editable: false },
-  stravaRefreshToken: { label: "Strava Refresh Token", secret: true, editable: false },
-  stravaExpiresAt: { label: "Strava Token läuft ab (Unix-Zeit)", secret: false, editable: false },
+  // Werden automatisch durch den Strava-OAuth-Ablauf gesetzt und über Firestore abgeglichen,
+  // damit die Strava-Verbindung auf allen Geräten/Adressen erhalten bleibt (siehe secrets-sync.js).
+  stravaAccessToken: { label: "Strava Access Token", secret: true, editable: false, sync: true, token: true },
+  stravaRefreshToken: { label: "Strava Refresh Token", secret: true, editable: false, sync: true, token: true },
+  stravaExpiresAt: { label: "Strava Token läuft ab (Unix-Zeit)", secret: false, editable: false, sync: true, token: true },
 };
 
 /** Nicht mehr genutzte Schlüssel, die beim Löschen trotzdem mit entfernt werden. */
@@ -60,6 +61,8 @@ export function getAllSettings() {
 
 /** Schlüssel, die mit Firestore abgeglichen werden. */
 export const SYNC_KEYS = Object.keys(SETTING_KEYS).filter((key) => SETTING_KEYS[key].sync);
+/** Strava-Tokens: werden nicht einfach überschrieben, sondern die neuere Fassung gewinnt. */
+export const TOKEN_KEYS = Object.keys(SETTING_KEYS).filter((key) => SETTING_KEYS[key].token);
 
 /** Entfernt alle Schlüssel und Tokens dieser App aus localStorage. */
 export function clearAllSettings() {

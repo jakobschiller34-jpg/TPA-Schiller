@@ -1,7 +1,7 @@
 // Planerfüllung: geplante Tage (aus der Gemini-Empfehlung) mit importierten Aktivitäten abgleichen.
 //
 // Reine Berechnungen ohne Netzwerkzugriff. Manuelle Häkchen (checks) überstimmen die Automatik:
-//   checks = { "JJJJ-MM-TT": { status: "done" | "skipped", extra: true | false } }
+//   checks = { "JJJJ-MM-TT": { status: "done" | "skipped", extra: true | false, supplement: true | false } }
 
 import { localDay, sportGroup, todayDay } from "./analysis.js";
 
@@ -12,8 +12,9 @@ export const DONE_RATIO = 0.7;
 /** Anteil der Zusatzdauer, der als Mehrzeit zusammenkommen muss. */
 export const EXTRA_RATIO = 0.5;
 
-/** Strava-Typen für „Kraft/Mobilität“. */
-const STRENGTH_TYPES = ["WeightTraining", "Workout", "Yoga", "Pilates", "Crossfit", "HighIntensityIntervalTraining"];
+/** Strava-Typen für Krafttraining bzw. Dehnen/Mobilität (Dehnen landet selten bei Strava → manuell abhaken). */
+const STRENGTH_TYPES = ["WeightTraining", "Workout", "Crossfit", "HighIntensityIntervalTraining"];
+const MOBILITY_TYPES = ["Yoga", "Pilates", "Workout"];
 /** Zählen an Ruhetagen nicht als Training. */
 const REST_FRIENDLY_TYPES = ["Walk", "Hike"];
 
@@ -35,7 +36,10 @@ const isoToDay = (iso) => Date.parse(`${iso}T00:00:00Z`);
 function matchesSport(planSport, activity) {
   if (planSport === "Laufen") return sportGroup(activity.sportType) === "run";
   if (planSport === "Rad") return sportGroup(activity.sportType) === "ride";
-  if (planSport === "Kraft/Mobilität") return STRENGTH_TYPES.includes(activity.sportType);
+  if (planSport === "Krafttraining") return STRENGTH_TYPES.includes(activity.sportType);
+  if (planSport === "Dehnen/Mobilität") return MOBILITY_TYPES.includes(activity.sportType);
+  // ältere Pläne
+  if (planSport === "Kraft/Mobilität") return [...STRENGTH_TYPES, ...MOBILITY_TYPES].includes(activity.sportType);
   return false;
 }
 
@@ -43,7 +47,8 @@ const minutesOf = (list) => list.reduce((sum, a) => sum + (a.movingTime ?? 0) / 
 
 /**
  * Bewertet einen Plantag.
- * @returns {{ date, session, status, auto, manual, actual: object[], actualMinutes, extraDone, extraAuto }}
+ * @returns {{ date, session, status, auto, manual, actual: object[], actualMinutes, extraDone, extraAuto,
+ *             supplementDone, supplementAuto }}
  */
 export function evaluateDay(session, activities, check = {}, now = new Date()) {
   const day = isoToDay(session.date);
@@ -68,16 +73,33 @@ export function evaluateDay(session, activities, check = {}, now = new Date()) {
     auto = day < today ? "missed" : day === today ? "today" : "planned";
   }
 
+  // Kraft-/Dehnblock: automatisch erledigt, wenn am Tag eine passende Strava-Aktivität existiert.
+  const supplement = session.supplement ?? null;
+  const supplementAuto = Boolean(supplement) && training.some((a) => matchesSport(supplement.kind, a));
+  const supplementDone = supplement ? (typeof check.supplement === "boolean" ? check.supplement : supplementAuto) : false;
+
   const extra = session.optionalExtra ?? null;
-  const extraAuto =
-    Boolean(extra) && auto === "done" && trainingMinutes - (session.durationMin || 0) >= EXTRA_RATIO * extra.durationMin;
+  const plannedMinutes = (session.durationMin || 0) + (supplementDone ? supplement.durationMin : 0);
+  const extraAuto = Boolean(extra) && auto === "done" && trainingMinutes - plannedMinutes >= EXTRA_RATIO * extra.durationMin;
 
   const manual = check.status ?? null;
   const status = manual === "done" ? (session.sport === "Ruhetag" ? "rest_kept" : "done") : manual === "skipped" ? "skipped" : auto;
   // Manuelles Häkchen gewinnt; automatisch zählt ein Extra nur, wenn die Kerneinheit erledigt ist.
   const extraDone = extra ? (typeof check.extra === "boolean" ? check.extra : extraAuto && status === "done") : false;
 
-  return { date: session.date, session, status, auto, manual, actual, actualMinutes: trainingMinutes, extraDone, extraAuto };
+  return {
+    date: session.date,
+    session,
+    status,
+    auto,
+    manual,
+    actual,
+    actualMinutes: trainingMinutes,
+    extraDone,
+    extraAuto,
+    supplementDone,
+    supplementAuto,
+  };
 }
 
 /**
@@ -95,6 +117,7 @@ export function disciplineStats(days) {
   const counted = days.filter((d) => STATUS_INFO[d.status]?.points !== null && STATUS_INFO[d.status]);
   const points = counted.reduce((sum, d) => sum + STATUS_INFO[d.status].points, 0);
   const withExtra = days.filter((d) => d.session.optionalExtra && STATUS_INFO[d.status]?.points !== null);
+  const withSupplement = days.filter((d) => d.session.supplement && STATUS_INFO[d.status]?.points !== null);
   return {
     countedDays: counted.length,
     fullDays: counted.filter((d) => STATUS_INFO[d.status].points === 1).length,
@@ -102,6 +125,8 @@ export function disciplineStats(days) {
     rate: counted.length ? points / counted.length : null,
     extrasOffered: withExtra.length,
     extrasDone: withExtra.filter((d) => d.extraDone).length,
+    supplementsOffered: withSupplement.length,
+    supplementsDone: withSupplement.filter((d) => d.supplementDone).length,
   };
 }
 
@@ -122,4 +147,50 @@ export function historyStats(analyses, activities, { now = new Date(), days = 28
     all.push(...evaluated.filter((d) => isoToDay(d.date) > from));
   });
   return { ...disciplineStats(all), days: all };
+}
+
+/** Strava-Typen, die für die Wochenziele als Kraft bzw. Dehnen zählen („Workout“ zählt als Kraft). */
+const COUNT_STRENGTH_TYPES = STRENGTH_TYPES;
+const COUNT_MOBILITY_TYPES = MOBILITY_TYPES.filter((t) => !STRENGTH_TYPES.includes(t));
+
+/**
+ * Tage mit erledigtem Kraft- bzw. Dehntraining (für die Wochenziele des Saisonplans).
+ * Ein Tag zählt höchstens einmal je Art. Quellen:
+ *  - Strava-Aktivität passenden Typs an diesem Tag,
+ *  - Kerneinheit „Krafttraining“/„Dehnen/Mobilität“ mit Status erledigt (auch manuell abgehakt),
+ *  - abgehakter bzw. automatisch erkannter Kraft-/Dehnblock (supplement).
+ * @returns {{ strength: Set<string>, mobility: Set<string> }} ISO-Daten (JJJJ-MM-TT)
+ */
+export function athleticsDays(analyses, activities, { now = new Date(), days = 7 * 32 } = {}) {
+  const strength = new Set();
+  const mobility = new Set();
+  const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+  for (const a of activities) {
+    if (COUNT_STRENGTH_TYPES.includes(a.sportType)) strength.add(iso(localDay(a)));
+    else if (COUNT_MOBILITY_TYPES.includes(a.sportType)) mobility.add(iso(localDay(a)));
+  }
+  const setFor = (kind) => (kind === "Dehnen/Mobilität" ? mobility : kind === "Krafttraining" || kind === "Kraft/Mobilität" ? strength : null);
+  for (const d of historyStats(analyses, activities, { now, days }).days) {
+    if (d.status === "done") setFor(d.session.sport)?.add(d.date);
+    if (d.supplementDone) setFor(d.session.supplement.kind)?.add(d.date);
+  }
+  return { strength, mobility };
+}
+
+/**
+ * Planerfüllung der letzten `days` Tage, kompakt für den Gemini-Wochenrückblick.
+ * Künftige Tage („geplant“) werden weggelassen.
+ */
+export function adherenceForAi(analyses, activities, { now = new Date(), days = 7 } = {}) {
+  return historyStats(analyses, activities, { now, days })
+    .days.filter((d) => d.status !== "planned")
+    .map((d) => ({
+      date: d.date,
+      planned: d.session.sport === "Ruhetag" ? "Ruhetag" : `${d.session.sport}: ${d.session.title} (${d.session.durationMin} min, ${d.session.intensity})`,
+      status: d.status,
+      supplement: d.session.supplement ? `${d.session.supplement.kind} ${d.session.supplement.durationMin} min` : null,
+      supplementDone: d.session.supplement ? d.supplementDone : null,
+      extraDone: d.session.optionalExtra ? d.extraDone : null,
+      actualMinutes: Math.round(d.actualMinutes),
+    }));
 }
